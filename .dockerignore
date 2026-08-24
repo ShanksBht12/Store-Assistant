@@ -1,0 +1,16 @@
+# Exclude the entire venv
+venv/
+
+# Git
+.git
+
+# Python cache
+__pycache__
+*.pyc
+
+# Test files and audio (not needed in container)
+test_*.py
+audio_clips/
+
+# Documentation
+*.md

@@ -1,0 +1,45 @@
+# Dockerfile for STT Service with NeMo support
+# Supports both SraVaani and IndicConformer providers
+
+FROM python:3.10-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    sox \
+    libsox-fmt-all \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install NeMo toolkit for IndicConformer
+RUN pip install --no-cache-dir nemo_toolkit[asr]
+
+# Copy application code
+COPY config/ config/
+COPY shared/ shared/
+COPY services/stt_service/ services/stt_service/
+COPY .env .env
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Expose port
+EXPOSE 8001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+# Run the service
+CMD ["python", "services/stt_service/main.py"]
