@@ -1,0 +1,44 @@
+language: ne          # ne = Nepali, en = English
+
+stt:
+  provider: sravaani  # Options: mock (testing), indicconformer, sravaani
+  mock:
+    sample_rate: 16000
+  indicconformer:
+    hf_model_id: ai4bharat/indicconformer_stt_ne_hybrid_rnnt_large
+    hf_token_env: HF_TOKEN
+    device: cuda        # "cuda" or "cpu"
+    sample_rate: 16000
+    decoding: rnnt      # "rnnt" or "ctc"
+  sravaani:
+    hf_model_id: ARTPARK-IISc/SraVaani-1.0
+    hf_token_env: HF_TOKEN
+    device: cuda
+    trust_remote_code: true
+    revision: main      # Pin to commit hash in production!
+
+llm:
+  provider: anthropic            # options: anthropic, openai, ollama_local, groq
+  anthropic:
+    model: claude-sonnet-5
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 1024
+  openai:
+    model: gpt-4.1
+    api_key_env: OPENAI_API_KEY
+  ollama_local:
+    model: llama3.1:8b
+    base_url: http://localhost:11434
+
+tts:
+  provider: elevenlabs           # options: elevenlabs, camb
+  elevenlabs:
+    api_key_env: ELEVENLABS_API_KEY
+    voice_id: xxxxxxxx
+    model_id: eleven_multilingual_v2
+  camb:
+    api_key_env: CAMB_API_KEY
+    voice_id: xxxxxxxx
+
+db:
+  path: ./data/ecommerce.db
