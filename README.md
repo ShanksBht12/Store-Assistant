@@ -77,6 +77,16 @@ python -m uvicorn app.main:app --reload
 
 The backend runs at `http://127.0.0.1:8000`.
 
+## Importing a Dataset
+
+The project includes an importer for the supplied `store_assistant.db` export. Place the database file in the repository root, then run:
+
+```powershell
+python -m app.database.import_dataset .\store_assistant.db
+```
+
+The importer replaces the application catalog with the dataset's 8 products and 22 price-history records. The source database also contains customer, order, CRM, and interaction tables; those remain available in the source export while the current chatbot uses the product catalog and price history.
+
 ### macOS or Linux
 
 ```bash
