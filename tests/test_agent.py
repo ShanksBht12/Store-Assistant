@@ -123,3 +123,15 @@ async def test_financial_gift_request_gets_empathetic_response(db):
     assert grounded is None
     assert product is None
     assert "prioritize food and essentials" in reply
+
+
+@pytest.mark.asyncio
+async def test_followup_price_claim_gets_database_verification(db):
+    _, _, previous_product = await handle_chat_message(db, "black shoes")
+    reply, grounded, product = await handle_chat_message(
+        db, "my friend bought it for 6000 rs only", previous_product.id
+    )
+    assert grounded is True
+    assert product.id == previous_product.id
+    assert "couldn't verify" in reply
+    assert "6500" in reply

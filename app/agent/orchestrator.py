@@ -81,6 +81,44 @@ def _special_response(message: str) -> str | None:
     return None
 
 
+def _price_claim_response(
+    db: Session, message: str, reference_product_id: int | None
+) -> tuple[str, Product] | None:
+    if not reference_product_id or not re.search(
+        r"\b(?:bought|buy|paid|price|cost)\b", message.lower()
+    ):
+        return None
+
+    amount_match = re.search(r"\b(\d+(?:[,.]\d+)?)\s*(?:rs|npr|rupees?)?\b", message.lower())
+    product = db.get(Product, reference_product_id)
+    if not amount_match or not product:
+        return None
+
+    claimed_amount = float(amount_match.group(1).replace(",", ""))
+    history = (
+        db.query(ProductPriceHistory)
+        .filter(ProductPriceHistory.product_id == product.id)
+        .all()
+    )
+    recorded_prices = {product.current_price} | {entry.price for entry in history}
+    variant = f"{product.name} - {product.color}" if product.color else product.name
+
+    if claimed_amount in recorded_prices:
+        response = (
+            f"Yes, {variant} was recorded at {claimed_amount:g} {product.currency} "
+            "at one point."
+        )
+    else:
+        lowest = min(recorded_prices) if recorded_prices else product.current_price
+        response = (
+            f"I couldn't verify a recorded price of {claimed_amount:g} "
+            f"{product.currency} for {variant}. The lowest price in our records "
+            f"is {lowest:g} {product.currency}."
+        )
+
+    return response, product
+
+
 def _is_product_query(db: Session, message: str) -> bool:
     words = set(re.findall(r"[a-z0-9]+", message.lower()))
     if words & (KNOWN_COLORS | PRODUCT_QUERY_WORDS):
@@ -172,6 +210,11 @@ async def handle_chat_message(
     special_response = _special_response(message)
     if special_response:
         return special_response, None, None
+
+    price_claim = _price_claim_response(db, message, reference_product_id)
+    if price_claim:
+        reply, product = price_claim
+        return reply, True, product
 
     product_query = _is_product_query(db, message)
     product = (
