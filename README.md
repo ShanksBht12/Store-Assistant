@@ -68,10 +68,10 @@ GROQ_API_BASE=https://api.groq.com/openai/v1
 GROQ_MODEL=qwen/qwen3.6-27b
 ```
 
-Seed the catalog and start the API:
+Import the catalog and start the API:
 
 ```powershell
-python -m app.database.seed
+python -m app.database.import_dataset .\store_assistant.db
 python -m uvicorn app.main:app --reload
 ```
 
@@ -94,7 +94,7 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python -m app.database.seed
+python -m app.database.import_dataset ./store_assistant.db
 python -m uvicorn app.main:app --reload
 ```
 
