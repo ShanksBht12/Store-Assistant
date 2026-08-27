@@ -329,7 +329,9 @@ body {
 }
 
 .buy-button-compact {
-  margin-top: 8px;
+  margin-top: 0;
+  margin-left: auto;
+  align-self: center;
   padding: 5px 9px;
   font-size: 11px;
 }

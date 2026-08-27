@@ -193,8 +193,8 @@ function ProductCard({ product, onPreview, onBuy }) {
             ? `${product.stock_quantity} in stock`
             : "Out of stock"}
         </div>
-        <BuyButton product={product} onBuy={onBuy} compact />
       </div>
+      <BuyButton product={product} onBuy={onBuy} compact />
     </div>
   );
 }
