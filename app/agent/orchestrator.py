@@ -17,7 +17,6 @@ For Phase 1 we keep the flow simple and still fully DB-grounded:
 This satisfies the core anti-hallucination rule from day one, even
 before the tool-calling architecture exists.
 """
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 import re
 
