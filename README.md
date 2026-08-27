@@ -85,7 +85,7 @@ The project includes an importer for the supplied `store_assistant.db` export. P
 python -m app.database.import_dataset .\store_assistant.db
 ```
 
-The importer replaces the application catalog with the enhanced dataset's 18 products and 22 price-history records, including brand, category, color, and image data. The source database also contains customer, order, CRM, interaction, and product-attribute tables; the current chatbot uses the product catalog and price history.
+The importer replaces the application catalog with the enhanced dataset's 18 products and 22 price-history records, including brand, category, color, and image data. It also normalizes product images by color when the source export reuses a mismatched image URL. The source database also contains customer, order, CRM, interaction, and product-attribute tables; the current chatbot uses the product catalog and price history.
 
 ### macOS or Linux
 

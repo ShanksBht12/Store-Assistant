@@ -7,6 +7,23 @@ from pathlib import Path
 from app.database.database import Base, SessionLocal, engine
 from app.database.models import Product, ProductPriceHistory
 
+COLOR_IMAGE_URLS = {
+    "black": "https://images.unsplash.com/photo-1495555961986-6d4c1ecb7be3?auto=format&fit=crop&w=800&q=85",
+    "blue": "https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=800&q=85",
+    "brown": "https://images.unsplash.com/photo-1460353581641-37baddab0fa2?auto=format&fit=crop&w=800&q=85",
+    "gray": "https://images.unsplash.com/photo-1460353581641-37baddab0fa2?auto=format&fit=crop&w=800&q=85",
+    "green": "https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=800&q=85",
+    "navy": "https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=800&q=85",
+    "orange": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=85&sat=35",
+    "red": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=85",
+    "white": "https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=800&q=85",
+}
+
+
+def _image_url(row):
+    color = (row["color"] or "").strip().lower()
+    return COLOR_IMAGE_URLS.get(color, row["image_url"])
+
 
 def _ensure_schema():
     Base.metadata.create_all(bind=engine)
@@ -53,7 +70,7 @@ def import_dataset(source_path: Path) -> tuple[int, int]:
                 description=row["description"],
                 category=row["category"],
                 color=row["color"],
-                image_url=row["image_url"],
+                image_url=_image_url(row),
                 current_price=row["current_price"],
                 currency=row["currency"],
                 stock_quantity=row["stock_quantity"],
