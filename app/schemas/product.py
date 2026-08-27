@@ -16,6 +16,7 @@ class ProductOut(BaseModel):
     id: int
     sku: str
     name: str
+    brand: str | None
     description: str | None
     category: str | None
     color: str | None

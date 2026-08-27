@@ -23,6 +23,7 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True)
     sku = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, index=True, nullable=False)
+    brand = Column(String, index=True, nullable=True)
     description = Column(String, nullable=True)
     category = Column(String, index=True, nullable=True)
     color = Column(String, index=True, nullable=True)

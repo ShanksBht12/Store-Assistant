@@ -349,6 +349,12 @@ body {
   text-transform: uppercase;
 }
 
+.product-card-brand {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .product-card-price {
   font-family: "JetBrains Mono", monospace;
   font-size: 13px;

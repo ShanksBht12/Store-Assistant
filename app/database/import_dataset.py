@@ -7,11 +7,15 @@ from pathlib import Path
 from app.database.database import Base, SessionLocal, engine
 from app.database.models import Product, ProductPriceHistory
 
-SHOE_IMAGE = (
-    "https://images.unsplash.com/photo-1600269452121-4f2416e55c28"
-    "?auto=format&fit=crop&w=800&q=85"
-)
 
+def _ensure_schema():
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        columns = connection.exec_driver_sql("PRAGMA table_info(products)").fetchall()
+        if not any(column[1] == "brand" for column in columns):
+            connection.exec_driver_sql(
+                "ALTER TABLE products ADD COLUMN brand VARCHAR"
+            )
 
 def import_dataset(source_path: Path) -> tuple[int, int]:
     """Replace the app catalog with products and history from source_path."""
@@ -20,7 +24,8 @@ def import_dataset(source_path: Path) -> tuple[int, int]:
         products = source.execute(
             """
             SELECT product_id, sku, name, category, description,
-                     current_price, currency, stock_quantity, created_at, updated_at
+                     brand, color, image_url, current_price, currency,
+                     stock_quantity, created_at, updated_at
             FROM products
             ORDER BY product_id
             """
@@ -33,7 +38,7 @@ def import_dataset(source_path: Path) -> tuple[int, int]:
             """
         ).fetchall()
 
-    Base.metadata.create_all(bind=engine)
+    _ensure_schema()
     db = SessionLocal()
     try:
         db.query(ProductPriceHistory).delete()
@@ -44,9 +49,11 @@ def import_dataset(source_path: Path) -> tuple[int, int]:
             product = Product(
                 sku=row["sku"],
                 name=row["name"],
+                brand=row["brand"],
                 description=row["description"],
                 category=row["category"],
-                image_url=SHOE_IMAGE,
+                color=row["color"],
+                image_url=row["image_url"],
                 current_price=row["current_price"],
                 currency=row["currency"],
                 stock_quantity=row["stock_quantity"],

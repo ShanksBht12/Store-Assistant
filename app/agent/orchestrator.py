@@ -47,7 +47,7 @@ KNOWN_COLORS = {
 
 PRODUCT_QUERY_WORDS = {
     "available", "buy", "cost", "inventory", "order", "price", "product",
-    "shoes", "stock", "store", "sunglasses",
+    "shoes", "stock", "store", "sunglasses", "running", "casual", "formal",
 }
 
 EXPLICIT_PRODUCT_WORDS = {"backpack", "backpacks", "shoes", "sunglasses"}
@@ -160,6 +160,8 @@ def _find_product(
         if set(words)
         & (
             set(re.findall(r"[a-z0-9]+", candidate.name.lower()))
+            | set(re.findall(r"[a-z0-9]+", (candidate.brand or "").lower()))
+            | set(re.findall(r"[a-z0-9]+", (candidate.category or "").lower()))
             | set(re.findall(r"[a-z0-9]+", (candidate.color or "").lower()))
         )
     ]
@@ -189,6 +191,7 @@ def _build_facts(db: Session, product: Product | None) -> str:
 
     lines = [
         f"Product model: {product.name}"
+        + (f"\nBrand: {product.brand}" if product.brand else "")
         + (f"\nColor: {product.color}" if product.color else ""),
         f"Current price: {product.current_price} {product.currency}",
         f"Stock quantity: {product.stock_quantity}",

@@ -6,7 +6,7 @@ A grounded e-commerce assistant built with FastAPI, SQLite, React, and Groq. It 
 
 - Groq-powered chat through the OpenAI-compatible API
 - Database-grounded product answers for price, stock, color, and history
-- Product matching for shoes, backpacks, and color variants
+- Product matching by model, brand, category, color, and price
 - Context-aware follow-ups such as `What blue one?`
 - Product cards with real images and expandable product details
 - Full-image preview with description, price, stock, and SKU
@@ -85,7 +85,7 @@ The project includes an importer for the supplied `store_assistant.db` export. P
 python -m app.database.import_dataset .\store_assistant.db
 ```
 
-The importer replaces the application catalog with the dataset's 8 products and 22 price-history records. The source database also contains customer, order, CRM, and interaction tables; those remain available in the source export while the current chatbot uses the product catalog and price history.
+The importer replaces the application catalog with the enhanced dataset's 18 products and 22 price-history records, including brand, category, color, and image data. The source database also contains customer, order, CRM, interaction, and product-attribute tables; the current chatbot uses the product catalog and price history.
 
 ### macOS or Linux
 

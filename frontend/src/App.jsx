@@ -168,6 +168,7 @@ function ProductCard({ product, onPreview }) {
           {product.name}
           {product.color && <span className="product-card-color">{product.color}</span>}
         </div>
+        {product.brand && <div className="product-card-brand">{product.brand}</div>}
         <div className="product-card-price">
           {product.current_price} {product.currency}
         </div>
