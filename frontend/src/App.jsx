@@ -15,6 +15,7 @@ export default function App() {
   const [conversationId, setConversationId] = useState(null);
   const [error, setError] = useState(null);
   const [previewProduct, setPreviewProduct] = useState(null);
+  const [purchaseMessage, setPurchaseMessage] = useState(null);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -48,6 +49,12 @@ export default function App() {
     }
   }
 
+  function handleBuy(product) {
+    const variant = product.color ? `${product.name} - ${product.color}` : product.name;
+    setPurchaseMessage(`${variant} added to your purchase request.`);
+    setPreviewProduct(null);
+  }
+
   return (
     <div className="page">
       <div className="receipt">
@@ -58,7 +65,7 @@ export default function App() {
 
         <div className="thread" ref={scrollRef}>
           {messages.map((m, i) => (
-            <Message key={i} message={m} onPreview={setPreviewProduct} />
+            <Message key={i} message={m} onPreview={setPreviewProduct} onBuy={handleBuy} />
           ))}
           {isSending && (
             <div className="msg agent">
@@ -86,6 +93,14 @@ export default function App() {
           </button>
         </form>
       </div>
+      {purchaseMessage && (
+        <div className="purchase-message" role="status">
+          {purchaseMessage}
+          <button type="button" onClick={() => setPurchaseMessage(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {previewProduct && (
         <div className="image-preview-backdrop" onClick={() => setPreviewProduct(null)}>
           <div
@@ -129,6 +144,7 @@ export default function App() {
                   <span>SKU</span>
                   <strong>{previewProduct.sku}</strong>
                 </div>
+                <BuyButton product={previewProduct} onBuy={handleBuy} />
               </div>
             </div>
           </div>
@@ -138,21 +154,21 @@ export default function App() {
   );
 }
 
-function Message({ message, onPreview }) {
+function Message({ message, onPreview, onBuy }) {
   const isAgent = message.role === "agent";
   return (
     <div className={`msg ${message.role}`}>
       <div className="bubble">
         <p>{message.text}</p>
         {isAgent && message.product && (
-          <ProductCard product={message.product} onPreview={onPreview} />
+          <ProductCard product={message.product} onPreview={onPreview} onBuy={onBuy} />
         )}
       </div>
     </div>
   );
 }
 
-function ProductCard({ product, onPreview }) {
+function ProductCard({ product, onPreview, onBuy }) {
   return (
     <div className="product-card">
       <button
@@ -177,7 +193,22 @@ function ProductCard({ product, onPreview }) {
             ? `${product.stock_quantity} in stock`
             : "Out of stock"}
         </div>
+        <BuyButton product={product} onBuy={onBuy} compact />
       </div>
     </div>
+  );
+}
+
+function BuyButton({ product, onBuy, compact = false }) {
+  const unavailable = product.stock_quantity <= 0;
+  return (
+    <button
+      className={`buy-button${compact ? " buy-button-compact" : ""}`}
+      type="button"
+      onClick={() => onBuy(product)}
+      disabled={unavailable}
+    >
+      {unavailable ? "Out of stock" : "Buy now"}
+    </button>
   );
 }
