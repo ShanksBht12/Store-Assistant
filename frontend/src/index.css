@@ -1,0 +1,415 @@
+:root {
+  --bg: #1c1b1a;
+  --panel: #24221f;
+  --text: #f2ede4;
+  --muted: #9c9488;
+  --divider: #3a3733;
+  --amber: #e8963c;
+  --teal: #4c8577;
+  --danger: #c85c4a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.page {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.receipt {
+  width: 100%;
+  max-width: 480px;
+  height: min(720px, 90vh);
+  background: var(--panel);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.receipt-header {
+  padding: 20px 20px 16px;
+  border-bottom: 1px dashed var(--divider);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.store-name {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 15px;
+}
+
+.store-sub {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.msg {
+  display: flex;
+}
+
+.msg.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 82%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.msg.agent .bubble {
+  background: #2c2a26;
+  border: 1px solid var(--divider);
+  border-top-left-radius: 2px;
+}
+
+.msg.user .bubble {
+  background: var(--amber);
+  color: #201a10;
+  border-top-right-radius: 2px;
+}
+
+.bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.stamp {
+  display: inline-block;
+  margin-top: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
+  border-radius: 3px;
+  border: 1px dashed;
+}
+
+.stamp-ok {
+  color: var(--teal);
+  border-color: var(--teal);
+}
+
+.stamp-none {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.typing {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 14px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+.dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.product-card {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  background: #171614;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 8px;
+  align-items: center;
+}
+
+.product-image-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 4px;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.product-image-button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.product-card img {
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.image-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.image-preview {
+  position: relative;
+  display: flex;
+  width: min(720px, 100%);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+}
+
+.image-preview img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.image-preview-content {
+  width: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 0.9fr);
+  gap: 20px;
+  align-items: center;
+}
+
+.image-preview-image-frame {
+  width: 100%;
+  height: min(360px, 50vh);
+  aspect-ratio: 4 / 3;
+  flex: 0 0 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: #171614;
+  border: 0;
+  border-radius: 6px;
+}
+
+.image-preview-info {
+  min-width: 0;
+}
+
+.image-preview-info h2 {
+  margin: 0 0 10px;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.image-preview-close {
+  align-self: flex-end;
+  border: 1px solid var(--divider);
+  border-radius: 4px;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.image-preview-description {
+  max-width: 420px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.image-preview-details {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px 20px;
+  padding-top: 4px;
+  font-size: 13px;
+}
+
+.image-preview-details span {
+  color: var(--muted);
+}
+
+.image-preview-details strong {
+  color: var(--text);
+  text-align: right;
+}
+
+@media (max-width: 560px) {
+  .image-preview-backdrop {
+    padding: 12px;
+  }
+
+  .image-preview-content {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .image-preview-image-frame {
+    height: min(280px, 42vh);
+  }
+
+  .image-preview-info h2 {
+    font-size: 19px;
+  }
+}
+
+.product-card-body {
+  min-width: 0;
+}
+
+.product-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.product-card-color {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  border: 1px solid var(--divider);
+  border-radius: 3px;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+.product-card-price {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  color: var(--amber);
+  margin-top: 2px;
+}
+
+.product-card-stock {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.error-bar {
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--danger);
+  background: rgba(200, 92, 74, 0.1);
+  border-top: 1px solid var(--divider);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px dashed var(--divider);
+}
+
+.composer input {
+  flex: 1;
+  background: #171614;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.composer input:focus {
+  outline: none;
+  border-color: var(--amber);
+}
+
+.composer button {
+  background: var(--amber);
+  color: #201a10;
+  border: none;
+  border-radius: 6px;
+  padding: 0 18px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}
