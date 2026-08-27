@@ -135,3 +135,14 @@ async def test_followup_price_claim_gets_database_verification(db):
     assert product.id == previous_product.id
     assert "couldn't verify" in reply
     assert "6500" in reply
+
+
+@pytest.mark.asyncio
+async def test_catalog_question_lists_available_products(db):
+    reply, grounded, product = await handle_chat_message(
+        db, "what are the products you have?"
+    )
+    assert grounded is True
+    assert product is None
+    assert "AeroRun X1" in reply
+    assert "Pink" in reply

@@ -55,6 +55,11 @@ PROGRAMMING_WORDS = {"code", "coding", "python", "program", "programming", "scri
 FINANCIAL_GIFT_WORDS = {
     "broke", "cash", "food", "girlfriend", "gift", "money", "starving",
 }
+CATALOG_QUERY_PHRASES = (
+    "what products", "what are the products", "what shoes", "shoe types",
+    "products you have", "what can i buy", "what do you sell", "show all",
+    "list products",
+)
 
 
 def _special_response(message: str) -> str | None:
@@ -117,6 +122,38 @@ def _price_claim_response(
         )
 
     return response, product
+
+
+def _catalog_response(db: Session, message: str) -> str | None:
+    normalized = message.lower()
+    words = set(re.findall(r"[a-z0-9]+", normalized))
+    is_catalog_request = (
+        any(phrase in normalized for phrase in CATALOG_QUERY_PHRASES)
+        or ("product" in words and "have" in words)
+        or ("products" in words and "buy" in words)
+        or ("shoes" in words and "types" in words)
+    )
+    if not is_catalog_request:
+        return None
+
+    products = db.query(Product).order_by(Product.brand, Product.name, Product.color).all()
+    if not products:
+        return "I do not have any products in the catalog right now."
+
+    lines = [f"We currently have {len(products)} products available:"]
+    for product in products:
+        brand = (
+            f"{product.brand} "
+            if product.brand and not product.name.lower().startswith(product.brand.lower())
+            else ""
+        )
+        color = f" ({product.color})" if product.color else ""
+        lines.append(
+            f"- {brand}{product.name}{color}: "
+            f"{product.current_price:g} {product.currency}, "
+            f"{product.stock_quantity} in stock"
+        )
+    return "\n".join(lines)
 
 
 def _is_product_query(db: Session, message: str) -> bool:
@@ -218,6 +255,10 @@ async def handle_chat_message(
     if price_claim:
         reply, product = price_claim
         return reply, True, product
+
+    catalog_response = _catalog_response(db, message)
+    if catalog_response:
+        return catalog_response, True, None
 
     product_query = _is_product_query(db, message)
     product = (
