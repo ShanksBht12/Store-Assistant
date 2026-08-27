@@ -51,6 +51,34 @@ PRODUCT_QUERY_WORDS = {
 }
 
 EXPLICIT_PRODUCT_WORDS = {"backpack", "backpacks", "shoes", "sunglasses"}
+PROGRAMMING_WORDS = {"code", "coding", "python", "program", "programming", "script"}
+FINANCIAL_GIFT_WORDS = {
+    "broke", "cash", "food", "girlfriend", "gift", "money", "starving",
+}
+
+
+def _special_response(message: str) -> str | None:
+    words = set(re.findall(r"[a-z0-9]+", message.lower()))
+
+    if words & PROGRAMMING_WORDS:
+        return (
+            "I'm here to help with our store's products, prices, stock, and orders. "
+            "I can't provide Python code, but I can help you find a product or "
+            "answer a store-related question."
+        )
+
+    if words & FINANCIAL_GIFT_WORDS and (
+        "girlfriend" in words or "gift" in words or "food" in words
+    ):
+        return (
+            "I'm sorry you're under that kind of pressure. Please prioritize food "
+            "and essentials before buying a gift. A thoughtful no-cost gift could "
+            "be a handwritten note, a playlist, a favorite meal when you can, or "
+            "time spent together. Being honest with your girlfriend about your "
+            "situation is more valuable than spending money you do not have."
+        )
+
+    return None
 
 
 def _is_product_query(db: Session, message: str) -> bool:
@@ -141,6 +169,10 @@ async def handle_chat_message(
     db: Session, message: str, reference_product_id: int | None = None
 ) -> tuple[str, bool | None, Product | None]:
     """Returns (reply_text, grounded, matched_product)."""
+    special_response = _special_response(message)
+    if special_response:
+        return special_response, None, None
+
     product_query = _is_product_query(db, message)
     product = (
         _find_product(db, message, reference_product_id) if product_query else None

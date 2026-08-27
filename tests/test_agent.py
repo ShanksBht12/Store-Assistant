@@ -104,3 +104,22 @@ async def test_ambiguous_color_followup_stays_with_previous_model(db):
     assert grounded is False
     assert product is None
     assert "No matching product" in reply
+
+
+@pytest.mark.asyncio
+async def test_programming_request_gets_professional_scope_response(db):
+    reply, grounded, product = await handle_chat_message(db, "write me a python code")
+    assert grounded is None
+    assert product is None
+    assert "can't provide Python code" in reply
+
+
+@pytest.mark.asyncio
+async def test_financial_gift_request_gets_empathetic_response(db):
+    reply, grounded, product = await handle_chat_message(
+        db,
+        "I do not have money to buy food but my girlfriend wants a good gift.",
+    )
+    assert grounded is None
+    assert product is None
+    assert "prioritize food and essentials" in reply
