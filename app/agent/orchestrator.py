@@ -38,7 +38,6 @@ Known facts:
 {facts}
 """
 
-# Recognized color words for matching queries like "black shoes" or "pink shoes".
 KNOWN_COLORS = {
     "black", "white", "pink", "blue", "grey", "gray", "red", "green",
     "brown", "tan", "navy", "yellow", "purple", "orange", "beige",
@@ -181,7 +180,7 @@ def _find_product(
 
     color_words = {w for w in words if w in KNOWN_COLORS}
 
-    candidates = db.query(Product).all()
+    candidates = db.query(Product).order_by(Product.id).all()
     if reference_product_id and not set(words) & EXPLICIT_PRODUCT_WORDS:
         reference_product = db.get(Product, reference_product_id)
         if reference_product:
@@ -204,8 +203,6 @@ def _find_product(
     if not candidates:
         return None
 
-    # If the user mentioned a color, prefer the candidate that actually has it —
-    # otherwise a plain "black shoes" query could return the wrong-colored pair.
     if color_words:
         for candidate in candidates:
             if candidate.color and candidate.color.lower() in color_words:
@@ -270,10 +267,30 @@ async def handle_chat_message(
         system_prompt=SYSTEM_PROMPT_TEMPLATE.format(facts=facts),
         user_message=message,
     )
-    if not reply.strip() and product is not None:
-        variant = f"{product.name} - {product.color}" if product.color else product.name
-        reply = (
-            f"{variant} is priced at {product.current_price} {product.currency} "
-            f"and has {product.stock_quantity} in stock."
+
+    if not reply or not reply.strip():
+        # This is the bug you're hitting: whenever the LLM call itself returns
+        # nothing (dropped/empty completion, provider error swallowed upstream,
+        # etc.) this function used to hand back an empty string, which the
+        # frontend renders as a blank bubble. We now always fall back to
+        # *something* so the user never sees a dead response, and we log the
+        # miss so it's visible in your server logs instead of silently vanishing.
+        print(
+            f"[orchestrator] empty LLM reply for message={message!r} "
+            f"product_query={product_query} matched_product="
+            f"{getattr(product, 'id', None)}"
         )
+        if product is not None:
+            variant = f"{product.name} - {product.color}" if product.color else product.name
+            reply = (
+                f"{variant} is priced at {product.current_price} {product.currency} "
+                f"and has {product.stock_quantity} in stock."
+            )
+        else:
+            reply = (
+                "I can help with product prices, stock, and orders — try asking "
+                "about a specific item, like \"do you have black shoes\" or "
+                "\"what's the price of the AeroRun X1\"."
+            )
+
     return reply, product is not None if product_query else None, product
