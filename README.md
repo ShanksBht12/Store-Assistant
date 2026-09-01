@@ -122,6 +122,7 @@ OPENAI_MODEL=openai/gpt-4o-mini
 Start the API:
 
 ```powershell
+python -m app.database.seed
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -147,6 +148,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # edit .env, then:
+python -m app.database.seed
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
