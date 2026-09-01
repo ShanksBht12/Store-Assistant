@@ -1,32 +1,40 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
-from app.api import chat, health, products
+from app.api import chat, orders
 from app.config import get_settings
 from app.database.database import Base, engine
 
 settings = get_settings()
 
-# Phase 1: create tables on startup if they don't exist yet.
-# (A real migration tool like Alembic is a good Phase-2+ addition.)
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME)
-
-# Allow the Vite dev server (frontend/) to call this API in local development.
-# Tighten this list before deploying anywhere public.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+app = FastAPI(
+    title="Store Assistant API",
+    description=(
+        "Backend for the Store Assistant — an AI-powered shoe store chatbot. "
+        "\n\n"
+        "**Chat** — send a message and receive a reply from the AI agent.\n\n"
+        "**Orders** — admin endpoints to list, view, and update order status."
+    ),
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url=None,  # disable the redundant ReDoc UI
 )
 
-app.include_router(health.router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?",
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
+
 app.include_router(chat.router)
-app.include_router(products.router)
+app.include_router(orders.router)
 
 
-@app.get("/")
-def root():
-    return {"message": f"{settings.APP_NAME} is running. See /docs for the API."}
+@app.options("/api/chat")
+async def chat_preflight() -> Response:
+    return Response(status_code=200)

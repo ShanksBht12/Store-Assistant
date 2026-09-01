@@ -1,56 +1,107 @@
-# AI Business Agent
+# Store Assistant — AI Business Agent
 
-A grounded e-commerce assistant built with FastAPI, SQLite, React, and Groq. It answers product questions using catalog data, returns the matching product and image, and keeps ambiguous follow-up questions within the product context already being discussed.
+A conversational AI sales assistant for a shoe store, built with FastAPI, SQLAlchemy, React, and OpenRouter. Customers can browse products, place orders, and track deliveries through a natural chat interface. Store owners get an admin API to manage orders.
 
 ## Features
 
-- Groq-powered chat through the OpenAI-compatible API
-- Database-grounded product answers for price, stock, color, and history
-- Product matching by model, brand, category, color, and price
-- Context-aware follow-ups such as `What blue one?`
-- Product cards with real images and expandable product details
-- Full-image preview with description, price, stock, and SKU
-- Casual conversation without unnecessary product cards
-- Mock provider for offline development and tests
-- FastAPI interactive documentation
+### Chat & AI
+- Real LLM function/tool calling — the agent decides which tools to invoke per turn
+- Full conversation memory persisted per session in SQLite (`ConversationState`)
+- Remembers customer names, previous products, and context across messages
+- Suggestion chips on the welcome screen for quick-start prompts
+- Markdown stripped from all replies — clean plain-text responses
+
+### Products
+- Search by keyword, brand, color, or category
+- Comparative queries ("cheapest", "most expensive") across the full catalog
+- Price history lookup per product
+- Live stock check before any order is placed
+- Product cards with image, price, stock, and brand — click to expand full detail modal
+
+### Orders
+- Full guided checkout: product → size/color → name → phone → address → payment
+- Nepali mobile number validation (98/97/96 prefix, 10 digits)
+- Stock decremented atomically in the same transaction as the order
+- eSewa and Khalti QR codes rendered automatically after digital payment orders
+- Cash on Delivery supported
+- Order status lookup by order ID or phone number
+
+### Admin
+- `GET /api/orders` — paginated list with filters: status, name/phone search, date range
+- `GET /api/orders/{id}` — single order detail
+- `PATCH /api/orders/{id}/status` — mark as paid or cancelled (restores stock on cancel)
+- Interactive API docs at `http://localhost:8000/docs`
+
+### Frontend
+- Modern dark SaaS chat UI with Inter font
+- Sidebar with capability list and new conversation button
+- Auto-resizing textarea, Enter to send, Shift+Enter for newlines
+- Character counter with colour warnings
+- Agent avatar and per-message timestamps
+- Toast notifications for order confirmations and errors
+- Full product image modal with details and buy button
+- QR payment modal — click the QR thumbnail to zoom to full card
+- Fully responsive — sidebar hides on mobile
 
 ## Stack
 
 | Layer | Technology |
-| --- | --- |
+|---|---|
 | Backend | FastAPI, Uvicorn, SQLAlchemy |
-| Database | SQLite |
-| LLM | Groq OpenAI-compatible Chat Completions API |
-| Frontend | React, Vite |
-| Testing | Pytest, pytest-asyncio |
+| Database | SQLite (`app.db`) |
+| LLM | OpenRouter (default) · OpenAI · Groq · Mock |
+| Frontend | React 18, Vite |
 
 ## Project Structure
 
-```text
+```
 ai-business-agent/
 ├── app/
-│   ├── agent/              # Product matching and grounded responses
-│   ├── api/                # Chat, health, and product routes
-│   ├── database/           # SQLAlchemy models and seed data
-│   ├── providers/llm/      # Groq and mock provider implementations
-│   └── schemas/            # API request and response schemas
-├── frontend/               # React and Vite chat application
-├── tests/                  # Backend tests
-├── .env.example            # Backend configuration template
-└── requirements.txt        # Python dependencies
+│   ├── agent/
+│   │   ├── agent.py          # Phase 2 tool-calling loop + conversation memory
+│   │   └── tools.py          # Tool registry: search, stock, price history, order, status
+│   ├── api/
+│   │   ├── chat.py           # POST /api/chat
+│   │   └── orders.py         # GET|PATCH /api/orders admin endpoints
+│   ├── database/
+│   │   ├── database.py       # SQLAlchemy engine and session
+│   │   └── models.py         # Product, Order, ConversationState, PriceHistory
+│   ├── providers/llm/
+│   │   ├── base.py           # Abstract LLMProvider interface
+│   │   ├── openai_provider.py # OpenAI / OpenRouter
+│   │   ├── groq.py           # Groq
+│   │   └── mock.py           # Offline mock for local dev
+│   ├── schemas/
+│   │   ├── chat.py           # ChatRequest / ChatResponse
+│   │   ├── order.py          # OrderOut / OrderListResponse
+│   │   └── product.py        # ProductOut / PriceHistoryOut
+│   ├── config.py             # Settings loaded from .env
+│   └── main.py               # FastAPI app, CORS, router registration
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx           # Chat UI, all components
+│   │   ├── api.js            # sendMessage() fetch wrapper
+│   │   ├── index.css         # Design system and all styles
+│   │   └── assets/           # eSewa and Khalti QR PNG cards
+│   └── index.html
+├── app.db                    # SQLite database (products + orders + conversations)
+├── .env                      # Local secrets — never commit
+├── .env.example              # Configuration template
+└── requirements.txt
 ```
 
 ## Requirements
 
-- Python 3.11 or newer
-- Node.js 18 or newer
-- A Groq API key from [Groq Console](https://console.groq.com/keys)
+- Python 3.11+
+- Node.js 18+
+- An OpenRouter API key — free tier available at [openrouter.ai](https://openrouter.ai)
 
-## Backend Setup
+## Setup
 
-### Windows PowerShell
+### 1. Backend
 
 ```powershell
+# Windows PowerShell
 cd D:\ai-business-agent
 python -m venv venv
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
@@ -59,149 +110,110 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Open `.env` and set:
+Open `.env` and set your key:
 
 ```env
-LLM_PROVIDER=groq
-GROQ_API_KEY=your_groq_api_key
-GROQ_API_BASE=https://api.groq.com/openai/v1
-GROQ_MODEL=qwen/qwen3.6-27b
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-or-v1-your-openrouter-key
+OPENAI_API_BASE=https://openrouter.ai/api/v1
+OPENAI_MODEL=openai/gpt-4o-mini
 ```
 
-Import the catalog and start the API:
+Start the API:
 
 ```powershell
-python -m app.database.import_dataset .\store_assistant.db
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The backend runs at `http://127.0.0.1:8000`.
+The backend runs at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
-## Importing a Dataset
-
-The project includes an importer for the supplied `store_assistant.db` export. Place the database file in the repository root, then run:
-
-```powershell
-python -m app.database.import_dataset .\store_assistant.db
-```
-
-The importer replaces the application catalog with the enhanced dataset's 18 products and 22 price-history records, including brand, category, color, and image data. It also normalizes product images by color when the source export reuses a mismatched image URL. The source database also contains customer, order, CRM, interaction, and product-attribute tables; the current chatbot uses the product catalog and price history.
-
-### macOS or Linux
-
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python -m app.database.import_dataset ./store_assistant.db
-python -m uvicorn app.main:app --reload
-```
-
-## Frontend Setup
+### 2. Frontend
 
 In a second terminal:
 
 ```powershell
 cd D:\ai-business-agent\frontend
 npm install
-Copy-Item .env.example .env
 npm run dev
 ```
 
-Open the URL printed by Vite, usually `http://localhost:5173`.
+Open the URL printed by Vite — usually `http://localhost:5174`.
 
-The frontend reads its backend URL from `VITE_API_BASE_URL`:
-
-```env
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-## API
-
-### Health Check
-
-```http
-GET /api/health
-```
-
-### Chat
+### macOS / Linux
 
 ```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"How much are black shoes?"}'
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# edit .env, then:
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-The response includes the assistant reply and, when a product is matched, structured product data including its image URL.
-
-### Product Endpoints
-
-```http
-GET /api/products/{product_id}
-GET /api/products/{product_id}/price-history
-```
-
-Interactive API documentation is available at `http://localhost:8000/docs`.
-
-## Example Questions
-
-- `How much are black shoes?`
-- `Do you have pink shoes?`
-- `Show me the blue backpack`
-- `What blue one?` after discussing a product
-- `Were these shoes cheaper before?`
-- `Hi`
-
-Product questions are answered from the catalog. Casual messages are handled as conversation without showing a product card. If a requested variant does not exist, the assistant does not invent product information.
-
-## Testing
-
-Run the backend tests from the repository root:
-
-```powershell
-.\venv\Scripts\python.exe -m pytest
-```
-
-Run a production build for the frontend:
-
-```powershell
-cd frontend
-npm run build
-```
-
-## Offline Development
-
-To run without a Groq API request, set this in `.env`:
-
-```env
-LLM_PROVIDER=mock
-```
-
-The mock provider returns deterministic responses for local testing. Database matching and API behavior can be tested without network access or usage costs.
 
 ## Configuration
 
 | Variable | Purpose | Default |
-| --- | --- | --- |
-| `LLM_PROVIDER` | Selects `groq` or `mock` | `groq` |
-| `GROQ_API_KEY` | Groq authentication key | Empty |
-| `GROQ_API_BASE` | Groq API base URL | `https://api.groq.com/openai/v1` |
-| `GROQ_MODEL` | Groq chat model | `qwen/qwen3.6-27b` |
-| `DATABASE_URL` | SQLAlchemy database URL | `sqlite:///./app.db` |
-| `MAX_INPUT_TOKENS` | Input guardrail setting | `4000` |
-| `MAX_OUTPUT_TOKENS` | Output token limit | `1000` |
+|---|---|---|
+| `LLM_PROVIDER` | `openai` · `groq` · `mock` | `openai` |
+| `OPENAI_API_KEY` | OpenRouter or OpenAI key | — |
+| `OPENAI_API_BASE` | API base URL | `https://openrouter.ai/api/v1` |
+| `OPENAI_MODEL` | Model name | `openai/gpt-4o-mini` |
+| `GROQ_API_KEY` | Groq key (if using Groq) | — |
+| `GROQ_MODEL` | Groq model | `qwen/qwen3.6-27b` |
+| `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./app.db` |
+| `MAX_INPUT_TOKENS` | Input token limit | `4000` |
+| `MAX_OUTPUT_TOKENS` | Output token limit | `2000` |
+| `DEBUG` | FastAPI debug mode | `true` |
+
+## API Reference
+
+### Chat
+
+```http
+POST /api/chat
+Content-Type: application/json
+
+{ "message": "How much are black shoes?", "conversation_id": "optional-uuid" }
+```
+
+Response:
+```json
+{
+  "conversation_id": "uuid",
+  "reply": "The Nike Air Max in Black is 13,000 NPR and we have 20 in stock.",
+  "product": { "id": 8, "name": "Nike Air Max", "color": "Black", ... },
+  "payment_method": null
+}
+```
+
+`conversation_id` is generated on the first turn and must be echoed back on every subsequent message to maintain memory.
+
+`payment_method` is `"esewa"` or `"khalti"` when an order is confirmed with a digital payment — the frontend uses this to render the QR card.
+
+### Orders (Admin)
+
+```http
+GET  /api/orders?status=pending_payment&search=sandeep&page=1&page_size=20
+GET  /api/orders/{id}
+PATCH /api/orders/{id}/status?status=paid
+```
+
+Full schema and try-it-out available at `/docs`.
+
+## Payment QR Codes
+
+After a successful eSewa or Khalti order the frontend automatically renders a payment QR card matching your reference design (dark background, provider logo, store name, merchant number, scan hint). Clicking the thumbnail opens a full-size zoom modal.
+
+To use your real merchant IDs, update the `merchantId` values in `QR_CONFIG` at the top of `frontend/src/App.jsx`, and replace the PNG files in `frontend/src/assets/` with QR images downloaded from your eSewa/Khalti merchant dashboard.
+
+## Offline Development
+
+Set `LLM_PROVIDER=mock` in `.env` to run without any API key. The mock provider returns deterministic responses so you can test the full request/response pipeline locally.
 
 ## Security Notes
 
-- Keep `.env` local and never commit API keys.
-- Use `.env.example` as the shareable configuration template.
-- Rotate any key that has been exposed in source code, logs, screenshots, or chat messages.
-- Tighten the CORS origins in `app/main.py` before public deployment.
-
-## Roadmap
-
-- Replace keyword matching with a tool registry and structured product tools.
-- Add inventory, order, CRM, and customer-service workflows.
-- Add database migrations with Alembic.
-- Add production deployment configuration and observability.
+- Never commit `.env` — it is listed in `.gitignore`.
+- Use `.env.example` as the shareable template.
+- Rotate any key that has appeared in source, logs, or screenshots.
+- Before deploying publicly, restrict the CORS `allow_origin_regex` in `app/main.py` to your actual frontend domain.
+- The admin order endpoints have no authentication — add an API key or session check before exposing them outside localhost.

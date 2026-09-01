@@ -1,185 +1,442 @@
 """
-Phase 2 tool registry.
+Phase 2 tool registry -- OOP version.
 
-Each tool is:
-  - a JSON-schema "spec" dict (OpenAI/Groq function-calling format) sent to
-    the model so it knows what's available and what arguments to pass
-  - a plain Python function taking (db: Session, **arguments) that returns
-    a JSON-serializable result
+Previously each tool was a bare function, referenced by name in a
+TOOL_FUNCTIONS dict, and the agent loop invoked it by looking up a string
+and calling it with **kwargs: `TOOL_FUNCTIONS[name](db, **arguments)`. That
+works, but it's dispatch-by-string with the schema (TOOL_SPECS) living
+completely separately -- nothing actually ties a function to its schema
+except both happening to use the same name string by convention. Nothing
+stops them drifting out of sync (e.g. renaming a function's parameter
+without updating its schema, or vice versa).
 
-The model decides which tool(s) to call and with what arguments -- we no
-longer guess intent with regex (that was Phase 1's `_is_product_query` /
-`_find_product`). We just execute exactly what the model asked for and feed
-the real DB result back to it, so it can't invent facts it wasn't given.
+Here, each tool is a class: its name, its JSON schema, and its behavior are
+one object. The agent loop calls tool.run(db, **arguments) through the
+shared Tool interface -- polymorphism, not string-keyed function lookup.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+import re
+from abc import ABC, abstractmethod
+from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.database.models import Product, ProductPriceHistory
+from app.database.models import Order, OrderStatus, Product, ProductPriceHistory
+
+PAYMENT_METHODS = {"esewa", "khalti", "cash on delivery", "cod"}
+
+# Nepali mobile numbers: start with 98, 97, or 96, exactly 10 digits total.
+_NEPALI_PHONE_RE = re.compile(r"^9[678]\d{8}$")
 
 
-def search_products(
-    db: Session,
-    query: str | None = None,
-    color: str | None = None,
-    category: str | None = None,
-    max_results: int = 5,
-) -> dict[str, Any]:
-    """Search the product catalog by name/brand/category keyword and/or color."""
-    q = db.query(Product)
-    if query:
-        like = f"%{query}%"
-        q = q.filter(
-            or_(
-                Product.name.ilike(like),
-                Product.brand.ilike(like),
-                Product.category.ilike(like),
+class Tool(ABC):
+    """Every tool the agent can call implements this. `name`, `spec`, and
+    `run()` living on the same object means there's exactly one place that
+    defines each tool, not a schema dict in one place and a function
+    somewhere else that both have to be kept in sync by hand."""
+
+    name: str
+
+    @property
+    @abstractmethod
+    def spec(self) -> dict[str, Any]:
+        """OpenAI/Groq-format function-calling schema for this tool."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def run(self, db: Session, **arguments: Any) -> dict[str, Any]:
+        """Execute the tool and return a JSON-serializable result."""
+        raise NotImplementedError
+
+
+class SearchProductsTool(Tool):
+    name = "search_products"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Search the store's product catalog. Use this for ANY "
+                    "product-related question: specific lookups, browsing, "
+                    "comparisons ('cheapest', 'most expensive'), or listing "
+                    "everything available. "
+                    "To list ALL products, omit 'query' and set max_results=50. "
+                    "To find the cheapest/most expensive, omit 'query', set "
+                    "max_results=50, then reason over the returned list. "
+                    "Never invent product details — always call this tool first."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "Free-text keyword matching name, brand, or category "
+                                "(e.g. 'Nike', 'running shoes'). Omit to return all products."
+                            ),
+                        },
+                        "color": {"type": "string", "description": "Filter by color, e.g. 'black'."},
+                        "category": {
+                            "type": "string",
+                            "description": "Filter by category, e.g. 'Shoes', 'Sunglasses'.",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Max products to return. Default 20. Use 50 for full catalog listing or comparisons.",
+                        },
+                    },
+                },
+            },
+        }
+
+    def run(
+        self,
+        db: Session,
+        query: str | None = None,
+        color: str | None = None,
+        category: str | None = None,
+        max_results: int = 20,
+    ) -> dict[str, Any]:
+        q = db.query(Product)
+        if query:
+            like = f"%{query}%"
+            q = q.filter(
+                or_(
+                    Product.name.ilike(like),
+                    Product.brand.ilike(like),
+                    Product.category.ilike(like),
+                )
             )
+        if color:
+            q = q.filter(Product.color.ilike(f"%{color}%"))
+        if category:
+            q = q.filter(Product.category.ilike(f"%{category}%"))
+
+        products = q.order_by(Product.id).limit(max_results).all()
+        return {
+            "count": len(products),
+            "products": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "brand": p.brand,
+                    "color": p.color,
+                    "category": p.category,
+                    "price": p.current_price,
+                    "currency": p.currency,
+                    "stock_quantity": p.stock_quantity,
+                }
+                for p in products
+            ],
+        }
+
+
+class GetPriceHistoryTool(Tool):
+    name = "get_price_history"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": "Get the recorded price history for one specific product, by its id.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "product_id": {"type": "integer", "description": "The product's database id."},
+                    },
+                    "required": ["product_id"],
+                },
+            },
+        }
+
+    def run(self, db: Session, product_id: int) -> dict[str, Any]:
+        product = db.get(Product, product_id)
+        if product is None:
+            return {"error": f"No product found with id {product_id}"}
+
+        history = (
+            db.query(ProductPriceHistory)
+            .filter(ProductPriceHistory.product_id == product_id)
+            .order_by(ProductPriceHistory.valid_from)
+            .all()
         )
-    if color:
-        q = q.filter(Product.color.ilike(f"%{color}%"))
-    if category:
-        q = q.filter(Product.category.ilike(f"%{category}%"))
+        return {
+            "product_id": product_id,
+            "product_name": product.name,
+            "current_price": product.current_price,
+            "currency": product.currency,
+            "history": [
+                {
+                    "date": h.valid_from.date().isoformat(),
+                    "price": h.price,
+                    "currency": h.currency,
+                }
+                for h in history
+            ],
+        }
 
-    products = q.order_by(Product.id).limit(max_results).all()
-    return {
-        "count": len(products),
-        "products": [
-            {
-                "id": p.id,
-                "name": p.name,
-                "brand": p.brand,
-                "color": p.color,
-                "category": p.category,
-                "price": p.current_price,
-                "currency": p.currency,
-                "stock_quantity": p.stock_quantity,
+
+class CheckStockTool(Tool):
+    name = "check_stock"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": "Check live stock quantity for one specific product, by its id.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "product_id": {"type": "integer", "description": "The product's database id."},
+                    },
+                    "required": ["product_id"],
+                },
+            },
+        }
+
+    def run(self, db: Session, product_id: int) -> dict[str, Any]:
+        product = db.get(Product, product_id)
+        if product is None:
+            return {"error": f"No product found with id {product_id}"}
+        return {
+            "product_id": product_id,
+            "product_name": product.name,
+            "stock_quantity": product.stock_quantity,
+            "in_stock": product.stock_quantity > 0,
+        }
+
+
+class CreateOrderTool(Tool):
+    name = "create_order"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Create a pending order for the customer. Only call this "
+                    "once you have: confirmed the exact product (and its "
+                    "stock via check_stock), the customer's size and/or "
+                    "color if relevant, and collected their full name, phone "
+                    "number, delivery address, and payment method (eSewa, "
+                    "Khalti, or Cash on Delivery). If anything required is "
+                    "missing, ask the customer for it first instead of "
+                    "calling this -- do not guess or fill in placeholder "
+                    "values."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "product_id": {"type": "integer", "description": "The product's database id."},
+                        "customer_name": {"type": "string"},
+                        "phone": {"type": "string"},
+                        "address": {"type": "string"},
+                        "payment_method": {
+                            "type": "string",
+                            "description": "One of: eSewa, Khalti, Cash on Delivery",
+                        },
+                        "size": {"type": "string", "description": "e.g. 'EU 42', 'US 9'."},
+                        "color": {"type": "string"},
+                        "quantity": {"type": "integer", "description": "Default 1."},
+                    },
+                    "required": [
+                        "product_id",
+                        "customer_name",
+                        "phone",
+                        "address",
+                        "payment_method",
+                    ],
+                },
+            },
+        }
+
+    def run(
+        self,
+        db: Session,
+        product_id: int,
+        customer_name: str,
+        phone: str,
+        address: str,
+        payment_method: str,
+        size: str | None = None,
+        color: str | None = None,
+        quantity: int = 1,
+        conversation_id: str | None = None,
+    ) -> dict[str, Any]:
+        product = db.get(Product, product_id)
+        if product is None:
+            return {"error": f"No product found with id {product_id}"}
+        if quantity < 1:
+            return {"error": "quantity must be at least 1"}
+        if product.stock_quantity < quantity:
+            return {
+                "error": (
+                    f"Only {product.stock_quantity} left in stock, "
+                    f"cannot order {quantity}."
+                )
             }
-            for p in products
-        ],
+        if payment_method.strip().lower() not in PAYMENT_METHODS:
+            return {
+                "error": (
+                    f"Unsupported payment method '{payment_method}'. "
+                    "Supported: eSewa, Khalti, Cash on Delivery."
+                )
+            }
+
+        # Validate Nepali mobile number (strip spaces/dashes first)
+        phone_digits = re.sub(r"[\s\-]", "", phone)
+        if not _NEPALI_PHONE_RE.match(phone_digits):
+            return {
+                "error": (
+                    f"'{phone}' doesn't look like a valid Nepali mobile number. "
+                    "Please provide a 10-digit number starting with 98, 97, or 96."
+                )
+            }
+
+        total_price = product.current_price * quantity
+        order = Order(
+            conversation_id=conversation_id,
+            product_id=product.id,
+            product_name_snapshot=product.name,
+            color=color or product.color,
+            size=size,
+            quantity=quantity,
+            unit_price=product.current_price,
+            total_price=total_price,
+            currency=product.currency,
+            customer_name=customer_name,
+            phone=phone_digits,
+            address=address,
+            payment_method=payment_method,
+            status=OrderStatus.PENDING_PAYMENT,
+        )
+        db.add(order)
+
+        # Decrement stock atomically in the same transaction so overselling
+        # is impossible — if the commit fails, neither the order nor the
+        # stock change is persisted.
+        product.stock_quantity -= quantity
+        db.add(product)
+
+        db.commit()
+        db.refresh(order)
+
+        return {
+            "order_id": order.id,
+            "product_name": product.name,
+            "size": size,
+            "color": order.color,
+            "quantity": quantity,
+            "total_price": total_price,
+            "currency": product.currency,
+            "payment_method": payment_method,
+            "status": order.status.value,
+        }
+
+
+class GetOrderStatusTool(Tool):
+    name = "get_order_status"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Look up one or more orders by order ID or by the customer's "
+                    "phone number. Use this whenever a customer asks about their "
+                    "order status, delivery, or payment confirmation. "
+                    "Provide either order_id OR phone — not both."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "order_id": {
+                            "type": "integer",
+                            "description": "The numeric order ID from the order confirmation.",
+                        },
+                        "phone": {
+                            "type": "string",
+                            "description": "Customer's 10-digit Nepali mobile number to look up all their orders.",
+                        },
+                    },
+                },
+            },
+        }
+
+    def run(
+        self,
+        db: Session,
+        order_id: int | None = None,
+        phone: str | None = None,
+    ) -> dict[str, Any]:
+        if not order_id and not phone:
+            return {"error": "Provide either order_id or phone to look up an order."}
+
+        if order_id:
+            order = db.get(Order, order_id)
+            if order is None:
+                return {"error": f"No order found with id {order_id}."}
+            return {"orders": [_order_to_dict(order)]}
+
+        # Lookup by phone — normalise the same way CreateOrderTool does
+        phone_digits = re.sub(r"[\s\-]", "", phone)
+        orders = (
+            db.query(Order)
+            .filter(Order.phone == phone_digits)
+            .order_by(Order.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        if not orders:
+            return {"error": f"No orders found for phone number {phone}."}
+        return {"orders": [_order_to_dict(o) for o in orders]}
+
+
+def _order_to_dict(order: Order) -> dict[str, Any]:
+    return {
+        "order_id": order.id,
+        "product_name": order.product_name_snapshot,
+        "color": order.color,
+        "size": order.size,
+        "quantity": order.quantity,
+        "total_price": order.total_price,
+        "currency": order.currency,
+        "payment_method": order.payment_method,
+        "status": order.status.value,
+        "customer_name": order.customer_name,
+        "phone": order.phone,
+        "address": order.address,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
     }
 
 
-def get_price_history(db: Session, product_id: int) -> dict[str, Any]:
-    """Return the recorded price history for a specific product id."""
-    product = db.get(Product, product_id)
-    if product is None:
-        return {"error": f"No product found with id {product_id}"}
+# --- Registry ----------------------------------------------------------
+# One dict, built from the tool objects themselves -- TOOL_SPECS is derived
+# from TOOLS, not maintained as a second, independent list that could
+# silently drift out of sync with the actual tool classes.
 
-    history = (
-        db.query(ProductPriceHistory)
-        .filter(ProductPriceHistory.product_id == product_id)
-        .order_by(ProductPriceHistory.valid_from)
-        .all()
+TOOLS: dict[str, Tool] = {
+    tool.name: tool
+    for tool in (
+        SearchProductsTool(),
+        GetPriceHistoryTool(),
+        CheckStockTool(),
+        CreateOrderTool(),
+        GetOrderStatusTool(),
     )
-    return {
-        "product_id": product_id,
-        "product_name": product.name,
-        "current_price": product.current_price,
-        "currency": product.currency,
-        "history": [
-            {
-                "date": h.valid_from.date().isoformat(),
-                "price": h.price,
-                "currency": h.currency,
-            }
-            for h in history
-        ],
-    }
-
-
-def check_stock(db: Session, product_id: int) -> dict[str, Any]:
-    """Return live stock quantity for a specific product id."""
-    product = db.get(Product, product_id)
-    if product is None:
-        return {"error": f"No product found with id {product_id}"}
-    return {
-        "product_id": product_id,
-        "product_name": product.name,
-        "stock_quantity": product.stock_quantity,
-        "in_stock": product.stock_quantity > 0,
-    }
-
-
-# --- OpenAI/Groq-format tool specs sent to the model -----------------------
-
-TOOL_SPECS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_products",
-            "description": (
-                "Search the store's product catalog by keyword (matches name, "
-                "brand, or category), optionally filtered by color or category. "
-                "Use this whenever the user asks about a product, wants "
-                "recommendations, or asks what's available -- never guess or "
-                "invent product details."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Free-text keyword, e.g. product name, brand, or type ('shoes', 'AeroRun').",
-                    },
-                    "color": {
-                        "type": "string",
-                        "description": "Filter by color, e.g. 'black'.",
-                    },
-                    "category": {
-                        "type": "string",
-                        "description": "Filter by category, e.g. 'Shoes', 'Sunglasses'.",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Max number of matches to return. Default 5.",
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_price_history",
-            "description": "Get the recorded price history for one specific product, by its id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_id": {
-                        "type": "integer",
-                        "description": "The product's database id.",
-                    },
-                },
-                "required": ["product_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_stock",
-            "description": "Check live stock quantity for one specific product, by its id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_id": {
-                        "type": "integer",
-                        "description": "The product's database id.",
-                    },
-                },
-                "required": ["product_id"],
-            },
-        },
-    },
-]
-
-TOOL_FUNCTIONS: dict[str, Callable[..., dict[str, Any]]] = {
-    "search_products": search_products,
-    "get_price_history": get_price_history,
-    "check_stock": check_stock,
 }
+
+TOOL_SPECS: list[dict[str, Any]] = [tool.spec for tool in TOOLS.values()]

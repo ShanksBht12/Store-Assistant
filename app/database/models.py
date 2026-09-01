@@ -1,13 +1,26 @@
 """
 Phase 1 database models: products + product_price_history.
+Phase 2 additions: conversation_states (persisted chat history so the agent
+has memory across requests) + orders (created by the create_order tool).
 
 CRM/HRM/omnichannel tables are added in later phases per the
 project's development order — keeping this file scoped to what
 Phase 1 actually needs avoids a giant premature schema.
 """
+import enum
+import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+)
 from sqlalchemy.orm import relationship
 
 from app.database.database import Base
@@ -51,3 +64,51 @@ class ProductPriceHistory(Base):
     created_at = Column(DateTime, default=_utcnow)
 
     product = relationship("Product", back_populates="price_history")
+
+
+class OrderStatus(str, enum.Enum):
+    PENDING_PAYMENT = "pending_payment"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+
+
+class ConversationState(Base):
+    """One row per conversation/session. Stores the full running message
+    history (system/user/assistant/tool turns) as JSON so the agent has
+    real memory across HTTP requests -- without this, every call starts a
+    brand new conversation with no memory of what was said a turn ago."""
+
+    __tablename__ = "conversation_states"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    messages = Column(JSON, nullable=False, default=list)
+    last_product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class Order(Base):
+    """A customer order, created by the create_order tool once the agent has
+    gathered everything it needs. Snapshots product name/price at order time
+    so later catalog price changes don't rewrite order history."""
+
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(String, ForeignKey("conversation_states.id"), nullable=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_name_snapshot = Column(String, nullable=False)
+    color = Column(String, nullable=True)
+    size = Column(String, nullable=True)
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Float, nullable=False)
+    total_price = Column(Float, nullable=False)
+    currency = Column(String, default="NPR", nullable=False)
+    customer_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    address = Column(String, nullable=True)
+    payment_method = Column(String, nullable=True)
+    status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.PENDING_PAYMENT)
+    created_at = Column(DateTime, default=_utcnow)
+
+    product = relationship("Product")

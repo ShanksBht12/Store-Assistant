@@ -3,26 +3,27 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.agent.orchestrator import handle_chat_message
+from app.agent.agent import handle_chat_message
 from app.database.database import get_db
 from app.schemas.chat import ChatRequest, ChatResponse
 
-router = APIRouter(tags=["chat"])
+router = APIRouter(tags=["Chat"])
 
 
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, db: Session = Depends(get_db)):
+    # Generate a conversation_id on first turn; the client echoes it back
+    # on every subsequent message so the agent can load its history.
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+
     try:
-        reply, grounded, product = await handle_chat_message(
-            db, request.message, request.reference_product_id
-        )
+        reply, product, payment_method = await handle_chat_message(db, conversation_id, request.message)
     except RuntimeError as exc:
-        # LLM/provider failure — fail gracefully, never fabricate an answer.
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return ChatResponse(
-        conversation_id=request.conversation_id or str(uuid.uuid4()),
+        conversation_id=conversation_id,
         reply=reply,
-        grounded=grounded,
         product=product,
+        payment_method=payment_method,
     )

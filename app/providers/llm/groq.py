@@ -22,6 +22,12 @@ class GroqProvider(LLMProvider):
         self.model = settings.GROQ_MODEL
 
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Private helper (leading underscore = not part of the public
+        interface, an internal implementation detail of THIS provider only).
+        Nothing outside this class should ever call _post() directly --
+        that's encapsulation: the HTTP/auth mechanics are hidden behind
+        chat(), which is the only thing the rest of the app is allowed to
+        depend on."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -39,10 +45,10 @@ class GroqProvider(LLMProvider):
     async def chat(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
     ) -> dict[str, Any]:
-        """Phase 2: send a full message history (optionally with tool specs)
-        and return the raw assistant message dict -- content, tool_calls, or
-        both -- so the caller (app/agent/agent.py) can run the tool loop.
-        """
+        """This is the ONE method LLMProvider actually requires. Everything
+        else this class needs (generate(), the empty-completion check) is
+        inherited from the base class -- we don't redefine it here, which is
+        exactly what stops that logic from being duplicated per-provider."""
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -58,9 +64,10 @@ class GroqProvider(LLMProvider):
         finish_reason = choice.get("finish_reason")
         message = choice["message"]
 
-        # Same truncation trap as generate() below: a reasoning model can burn
-        # its whole token budget on hidden thinking and return neither content
-        # nor tool_calls. Surface that instead of handing back a dead message.
+        # Reasoning models can burn their whole token budget on hidden
+        # "thinking" and return neither content nor a tool call. Surface
+        # that clearly instead of handing the base class a dead message it
+        # has no way to explain.
         if finish_reason == "length" and not message.get("content") and not message.get(
             "tool_calls"
         ):
@@ -72,23 +79,14 @@ class GroqProvider(LLMProvider):
 
         return message
 
-    async def generate(self, system_prompt: str, user_message: str) -> str:
-        """Phase 1-style single-shot call, kept for anything that doesn't
-        need tools. Implemented on top of chat() so there's one code path."""
-        message = await self.chat(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ]
-        )
-        content = message.get("content") or ""
-
-        if not content.strip():
-            raise RuntimeError(
-                f"Groq returned an empty completion for model={self.model!r}."
-            )
-
-        # Keep model reasoning out of the response if the API returns it anyway.
+    def _clean_content(self, content: str) -> str:
+        """Groq-specific post-processing only -- this is the hook the base
+        class's generate() calls. Nothing else in this class needs to
+        change if this logic ever changes; nothing outside this class needs
+        to know this logic exists at all. That's encapsulation: the
+        Groq-specific quirk (occasionally leaking hidden reasoning, or
+        markdown bold despite being told not to) is contained to exactly
+        the one place that knows about it."""
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
         content = content.replace("**", "")
-        return content.strip()
+        return content
