@@ -111,7 +111,55 @@ def _strip_markdown(text: str) -> str:
 
 
 
-_DIGITAL_PAYMENT_METHODS = {"esewa", "khalti"}
+def _sanitise_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalise the message list before sending to the API.
+
+    Handles two problems that cause 400s from OpenRouter:
+    1. Assistant messages with tool_calls but content=None — must send content
+       as an empty string or null explicitly, not omit the key.
+    2. Tool messages must always have tool_call_id. If it was lost during a
+       JSON round-trip through SQLite, drop the orphaned tool message to avoid
+       a malformed history (better to lose one turn than to crash every turn).
+    """
+    clean: list[dict[str, Any]] = []
+    # Collect valid tool_call ids from assistant messages in this pass
+    valid_tool_call_ids: set[str] = set()
+
+    for msg in messages:
+        role = msg.get("role")
+
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                # Ensure content key exists (even as None/null)
+                out = {
+                    "role": "assistant",
+                    "content": msg.get("content"),  # null is fine, missing is not
+                    "tool_calls": tool_calls,
+                }
+                for tc in tool_calls:
+                    tc_id = tc.get("id") if isinstance(tc, dict) else None
+                    if tc_id:
+                        valid_tool_call_ids.add(tc_id)
+            else:
+                out = {"role": "assistant", "content": msg.get("content", "")}
+            clean.append(out)
+
+        elif role == "tool":
+            tc_id = msg.get("tool_call_id")
+            if not tc_id:
+                # Orphaned tool message — drop it
+                continue
+            valid_tool_call_ids.discard(tc_id)
+            clean.append(msg)
+
+        else:
+            clean.append(msg)
+
+    return clean
+
+
+
 
 
 def _extract_product_and_payment(
@@ -191,7 +239,7 @@ async def handle_chat_message(
     tool_calls_made: list[dict[str, Any]] = []
 
     for _ in range(MAX_TOOL_ITERATIONS):
-        assistant_message = await llm.chat(messages, tools=TOOL_SPECS)
+        assistant_message = await llm.chat(_sanitise_messages(messages), tools=TOOL_SPECS)
         tool_calls = assistant_message.get("tool_calls")
 
         if not tool_calls:

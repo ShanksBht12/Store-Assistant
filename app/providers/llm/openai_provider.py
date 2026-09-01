@@ -69,6 +69,15 @@ class OpenAIProvider(LLMProvider):
                 # (e.g. 401 = bad/wrong-service key, 429 = rate limited) so
                 # it gets caught and re-raised below with more context,
                 # instead of silently continuing with a broken `response`.
+                if not response.is_success:
+                    # Log the full body so we can see exactly what OpenRouter rejected
+                    try:
+                        detail = response.json()
+                    except Exception:
+                        detail = response.text
+                    raise RuntimeError(
+                        f"OpenAI API request failed: {response.status_code} — {detail}"
+                    )
                 response.raise_for_status()
             except httpx.HTTPError as exc:
                 raise RuntimeError(f"OpenAI API request failed: {exc}") from exc
