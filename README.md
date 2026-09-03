@@ -144,7 +144,7 @@ Open the URL printed by Vite — usually `http://localhost:5174`.
 
 ```bash
 python -m venv venv
-source venv/bin/activate
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 cp .env.example .env
 # edit .env, then:

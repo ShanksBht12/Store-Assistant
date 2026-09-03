@@ -304,6 +304,25 @@ class CreateOrderTool(Tool):
                 )
             }
 
+        # Duplicate order guard — prevent placing a second order for the same
+        # product in the same conversation session.
+        if conversation_id:
+            existing = (
+                db.query(Order)
+                .filter(
+                    Order.conversation_id == conversation_id,
+                    Order.product_id == product_id,
+                )
+                .first()
+            )
+            if existing:
+                return {
+                    "error": (
+                        f"An order for this product already exists in this session "
+                        f"(Order ID: {existing.id}). To make changes, contact support at 9800000006."
+                    )
+                }
+
         total_price = product.current_price * quantity
         order = Order(
             conversation_id=conversation_id,
@@ -423,6 +442,197 @@ def _order_to_dict(order: Order) -> dict[str, Any]:
     }
 
 
+class ValidatePhoneTool(Tool):
+    name = "validate_phone"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Validate a Nepali mobile phone number IMMEDIATELY after "
+                    "the customer provides it — before asking for address or "
+                    "payment method. Returns valid=true if it is a 10-digit "
+                    "number starting with 98, 97, or 96. If invalid, tell the "
+                    "customer right away and ask them to re-enter it."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "phone": {
+                            "type": "string",
+                            "description": "The phone number the customer provided.",
+                        }
+                    },
+                    "required": ["phone"],
+                },
+            },
+        }
+
+    def run(self, db: Session, phone: str) -> dict[str, Any]:
+        digits = re.sub(r"[\s\-]", "", phone)
+        if _NEPALI_PHONE_RE.match(digits):
+            return {"valid": True, "phone": digits}
+        return {
+            "valid": False,
+            "phone": phone,
+            "reason": (
+                f"'{phone}' is not a valid Nepali mobile number. "
+                "Must be 10 digits starting with 98, 97, or 96."
+            ),
+        }
+
+
+class ValidateAddressTool(Tool):
+    name = "validate_address"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Validate a delivery address IMMEDIATELY after the customer "
+                    "provides it — before asking for payment method. "
+                    "A valid address must be within Nepal and contain enough "
+                    "detail to deliver to (area/tole/street + city at minimum). "
+                    "Single words, food names, gibberish, or vague responses "
+                    "are invalid. If invalid, ask the customer to re-enter a "
+                    "complete delivery address."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "The delivery address the customer provided.",
+                        }
+                    },
+                    "required": ["address"],
+                },
+            },
+        }
+
+    def run(self, db: Session, address: str) -> dict[str, Any]:
+        address = address.strip()
+
+        # Must have at least 8 characters
+        if len(address) < 8:
+            return {
+                "valid": False,
+                "reason": f"'{address}' is too short to be a valid delivery address.",
+            }
+
+        # Must contain at least 2 words
+        words = address.split()
+        if len(words) < 2:
+            return {
+                "valid": False,
+                "reason": (
+                    f"'{address}' doesn't look like a complete address. "
+                    "Please provide area/tole/street and city."
+                ),
+            }
+
+        # Reject obvious non-addresses: all digits, single repeated char, etc.
+        if re.fullmatch(r"[\d\s\-]+", address):
+            return {
+                "valid": False,
+                "reason": f"'{address}' is not a valid address. Please provide a locality and city name.",
+            }
+
+        # Block known food/nonsense words as standalone addresses
+        _NONSENSE = {
+            "chana", "muni", "dal", "bhat", "roti", "khana", "pani",
+            "test", "abc", "xyz", "hello", "hi", "idk", "none", "na",
+            "nothing", "no", "yes", "ok", "okay",
+        }
+        lower_words = {w.lower().strip(".,") for w in words}
+        if lower_words.issubset(_NONSENSE):
+            return {
+                "valid": False,
+                "reason": (
+                    f"'{address}' is not a valid delivery address. "
+                    "Please provide a real location — for example: Thamel, Kathmandu or Lazimpat, Ward 2, Kathmandu."
+                ),
+            }
+
+        return {"valid": True, "address": address}
+
+
+class UpdateOrderPaymentTool(Tool):
+    name = "update_order_payment"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Update the payment method on an existing pending order in "
+                    "this conversation. Use this when the customer wants to "
+                    "change their payment method AFTER an order has already been "
+                    "placed — instead of creating a duplicate order. "
+                    "Only works if the order status is still pending_payment."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "order_id": {
+                            "type": "integer",
+                            "description": "The order ID to update.",
+                        },
+                        "payment_method": {
+                            "type": "string",
+                            "description": "New payment method: eSewa, Khalti, or Cash on Delivery.",
+                        },
+                    },
+                    "required": ["order_id", "payment_method"],
+                },
+            },
+        }
+
+    def run(self, db: Session, order_id: int, payment_method: str) -> dict[str, Any]:
+        order = db.get(Order, order_id)
+        if order is None:
+            return {"error": f"No order found with id {order_id}."}
+
+        if order.status != OrderStatus.PENDING_PAYMENT:
+            return {
+                "error": (
+                    f"Order {order_id} cannot be updated — "
+                    f"status is '{order.status.value}', not pending_payment."
+                )
+            }
+
+        normalised = payment_method.strip().lower()
+        if normalised not in PAYMENT_METHODS:
+            return {
+                "error": (
+                    f"Unsupported payment method '{payment_method}'. "
+                    "Supported: eSewa, Khalti, Cash on Delivery."
+                )
+            }
+
+        order.payment_method = payment_method
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+
+        return {
+            "order_id": order.id,
+            "product_name": order.product_name_snapshot,
+            "payment_method": order.payment_method,
+            "total_price": order.total_price,
+            "currency": order.currency,
+            "status": order.status.value,
+        }
+
+
 # --- Registry ----------------------------------------------------------
 # One dict, built from the tool objects themselves -- TOOL_SPECS is derived
 # from TOOLS, not maintained as a second, independent list that could
@@ -436,6 +646,9 @@ TOOLS: dict[str, Tool] = {
         CheckStockTool(),
         CreateOrderTool(),
         GetOrderStatusTool(),
+        ValidatePhoneTool(),
+        ValidateAddressTool(),
+        UpdateOrderPaymentTool(),
     )
 }
 

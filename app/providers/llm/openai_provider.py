@@ -60,7 +60,7 @@ class OpenAIProvider(LLMProvider):
             # your app in the OpenRouter dashboard.
             headers["HTTP-Referer"] = "http://localhost:8000"
             headers["X-Title"] = "ai-business-agent"
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             try:
                 response = await client.post(
                     f"{self.base_url}/chat/completions", headers=headers, json=payload
