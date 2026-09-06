@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
-from app.database.models import Order, OrderStatus, Product
+from app.database.models import Order, OrderItem, OrderStatus, Product
 from app.schemas.order import OrderListResponse, OrderOut
 
 router = APIRouter(tags=["Orders"])
@@ -85,10 +85,11 @@ def update_order_status(
 
     # Restore stock if we're cancelling an order that hadn't been paid yet
     if status == OrderStatus.CANCELLED and order.status == OrderStatus.PENDING_PAYMENT:
-        product = db.get(Product, order.product_id)
-        if product:
-            product.stock_quantity += order.quantity
-            db.add(product)
+        for item in order.items:
+            product = db.get(Product, item.product_id)
+            if product:
+                product.stock_quantity += item.quantity
+                db.add(product)
 
     order.status = status
     db.add(order)

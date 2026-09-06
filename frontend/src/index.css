@@ -582,6 +582,12 @@ body {
 .buy-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .buy-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.buy-btn--added {
+  background: var(--success) !important;
+  opacity: 1 !important;
+  cursor: default !important;
+}
+
 .buy-btn-lg {
   width: 100%;
   padding: 10px 16px;

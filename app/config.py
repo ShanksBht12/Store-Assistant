@@ -36,8 +36,7 @@ class Settings:
     # --- Database ---
     DATABASE_URL: str = _env("DATABASE_URL", "sqlite:///./app.db")
 
-    # --- Token guardrails (enforced fully starting Phase 7, but the
-    # config keys exist from Phase 1 so nothing needs to change later) ---
+
     MAX_INPUT_TOKENS: int = int(_env("MAX_INPUT_TOKENS", "4000"))
     MAX_OUTPUT_TOKENS: int = int(_env("MAX_OUTPUT_TOKENS", "1000"))
 

@@ -14,7 +14,7 @@ const QR_CONFIG = {
     color: "#60BB46",
     instructions: "Open your eSewa app → Scan QR → scan the code to complete payment.",
     merchantId: "9800000001",
-    storeName: "SOLE STORE",
+    storeName: "STYLE STORE",
   },
   khalti: {
     src: khaltiQr,
@@ -22,19 +22,19 @@ const QR_CONFIG = {
     color: "#5C2D91",
     instructions: "Open your Khalti app → Scan QR → scan the code to complete payment.",
     merchantId: "9800000002",
-    storeName: "SOLE STORE",
+    storeName: "STYLE STORE",
   },
 };
 
 const SUGGESTIONS = [
-  { icon: "👟", text: "What shoes do you have?" },
-  { icon: "💰", text: "Which is the cheapest?" },
-  { icon: "🔍", text: "Show me Nike shoes" },
+  { icon: "👕", text: "What clothes do you have?" },
+  { icon: "🕶️", text: "Show me sunglasses" },
+  { icon: "👟", text: "Show me Nike products" },
   { icon: "📦", text: "Check my order status" },
 ];
 
 const CAPABILITIES = [
-  { icon: "🔎", text: "Browse & search products" },
+  { icon: "🔎", text: "Browse clothing, shoes & accessories" },
   { icon: "💬", text: "Answer price & stock questions" },
   { icon: "🛒", text: "Guide you through checkout" },
   { icon: "📋", text: "Look up your order status" },
@@ -45,7 +45,7 @@ function makeWelcome() {
   return {
     id: 0,
     role: "agent",
-    text: "Hi! I'm your Store Assistant. I can help you find shoes, check prices and stock, place orders, and track deliveries. What are you looking for today?",
+    text: "Hi! I'm your Style Store Assistant. I can help you find clothing, shoes, sunglasses, watches, bags, kids items, and much more — check prices and stock, place orders, and track deliveries. What are you looking for today?",
     product: null,
     paymentMethod: null,
     ts: new Date(),
@@ -179,10 +179,10 @@ export default function App() {
       {/* ── Sidebar ── */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="brand-icon">👟</div>
+          <div className="brand-icon">🛍️</div>
           <div>
-            <div className="brand-name">Store Assistant</div>
-            <div className="brand-sub">AI Sales Agent</div>
+            <div className="brand-name">Style Store</div>
+            <div className="brand-sub">AI Shopping Assistant</div>
           </div>
         </div>
 
@@ -221,7 +221,7 @@ export default function App() {
           <div className="chat-header-left">
             <div className="agent-avatar-sm">🤖</div>
             <div>
-              <div className="chat-header-name">Store Assistant</div>
+              <div className="chat-header-name">Style Store Assistant</div>
               <div className="chat-header-status">Online</div>
             </div>
           </div>
@@ -292,7 +292,7 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value.slice(0, MAX_CHARS))}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about shoes, prices, or your order…"
+              placeholder="Ask about clothing, sunglasses, shoes, or your order…"
               disabled={isSending}
               rows={1}
               aria-label="Message input"
@@ -399,6 +399,14 @@ function MessageGroup({ message, onPreview, onBuy, onSuggestion }) {
 
 function ProductCard({ product, onPreview, onBuy }) {
   const inStock = product.stock_quantity > 0;
+  const [added, setAdded] = useState(false);
+
+  function handleBuy() {
+    if (added) return;
+    setAdded(true);
+    onBuy(product);
+  }
+
   return (
     <div className="product-card">
       <button
@@ -422,11 +430,12 @@ function ProductCard({ product, onPreview, onBuy }) {
       </div>
       <button
         type="button"
-        className="buy-btn"
-        onClick={() => onBuy(product)}
-        disabled={!inStock}
+        className={`buy-btn${added ? " buy-btn--added" : ""}`}
+        onClick={handleBuy}
+        disabled={!inStock || added}
+        aria-label={added ? "Added to cart" : "Buy now"}
       >
-        {inStock ? "Buy now" : "Out of stock"}
+        {!inStock ? "Out of stock" : added ? "✓ Added to cart" : "Buy now"}
       </button>
     </div>
   );

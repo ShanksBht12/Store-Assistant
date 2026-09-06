@@ -88,21 +88,14 @@ class ConversationState(Base):
 
 
 class Order(Base):
-    """A customer order, created by the create_order tool once the agent has
-    gathered everything it needs. Snapshots product name/price at order time
-    so later catalog price changes don't rewrite order history."""
+    """One order per customer checkout session. Contains customer details
+    and overall status. Line items are in OrderItem (one row per product)."""
 
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
     conversation_id = Column(String, ForeignKey("conversation_states.id"), nullable=True)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    product_name_snapshot = Column(String, nullable=False)
-    color = Column(String, nullable=True)
-    size = Column(String, nullable=True)
-    quantity = Column(Integer, nullable=False, default=1)
-    unit_price = Column(Float, nullable=False)
-    total_price = Column(Float, nullable=False)
+    grand_total = Column(Float, nullable=False, default=0.0)
     currency = Column(String, default="NPR", nullable=False)
     customer_name = Column(String, nullable=True)
     phone = Column(String, nullable=True)
@@ -111,4 +104,24 @@ class Order(Base):
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.PENDING_PAYMENT)
     created_at = Column(DateTime, default=_utcnow)
 
+    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+
+
+class OrderItem(Base):
+    """One row per product line in an order."""
+
+    __tablename__ = "order_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_name_snapshot = Column(String, nullable=False)
+    color = Column(String, nullable=True)
+    size = Column(String, nullable=True)
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Float, nullable=False)
+    line_total = Column(Float, nullable=False)
+    currency = Column(String, default="NPR", nullable=False)
+
+    order = relationship("Order", back_populates="items")
     product = relationship("Product")
