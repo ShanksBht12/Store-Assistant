@@ -1,10 +1,47 @@
+"""
+main.py — FastAPI application entry point.
+
+Responsibilities:
+  - Creates the FastAPI app instance
+  - Registers CORS middleware (allows the frontend dev server to call the API)
+  - Mounts the /api/chat and /api/orders routers
+  - Serves the compiled React frontend (frontend/dist/) as static files
+    so the whole app (API + UI) runs from a single server process
+
+Start the server with:
+    uvicorn app.main:app --reload
+"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from app.api import chat, orders
+import dspy
+
+from app.api import chat, orders, prompts
 from app.config import get_settings
+from app.agent.router import _resolve_lm
 from app.database.database import Base, engine
+
+settings = get_settings()
+
+Base.metadata.create_all(bind=engine)
+
+# ── Configure DSPy once at startup from the main thread ──────────────────────
+# dspy.configure() must be called from the main thread/task exactly once.
+# After this, every async request uses dspy.context(lm=...) to override
+# the LM per-task without touching the global state.
+try:
+    default_lm = _resolve_lm()          # reads LLM_PROVIDER + credentials from .env
+    dspy.configure(lm=default_lm)
+except Exception as _e:
+    # If credentials are missing (e.g. running without .env), skip DSPy config.
+    # The agent falls back to raw LLM output when DSPy is unconfigured.
+    pass
+
+# ── Seed initial prompt version if table is empty ────────────────────────────
+from app.agent.prompt import PromptRegistry
+PromptRegistry.seed_initial()
 
 settings = get_settings()
 
@@ -33,6 +70,7 @@ app.add_middleware(
 
 app.include_router(chat.router)
 app.include_router(orders.router)
+app.include_router(prompts.router)
 
 
 @app.options("/api/chat")

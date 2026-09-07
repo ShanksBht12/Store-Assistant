@@ -1,6 +1,13 @@
 """
-Mock provider — deterministic, no network calls. Useful for tests
-and for running the app without a valid external API key.
+providers/llm/mock.py — Mock LLM provider for testing.
+
+Returns deterministic, canned responses without making any network calls.
+Useful for:
+  - Running the app locally without a valid API key
+  - Writing automated tests that don't depend on external services
+  - Debugging the agent loop without burning API credits
+
+Activate by setting LLM_PROVIDER=mock in your .env file.
 """
 from typing import Any
 

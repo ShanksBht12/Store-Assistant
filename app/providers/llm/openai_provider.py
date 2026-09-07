@@ -1,9 +1,13 @@
-"""OpenAI provider using OpenAI's native chat completions API.
+"""
+providers/llm/openai_provider.py — OpenAI LLM provider.
 
-Note: OpenAI's API shape is what Groq's is modeled after, so this file
-looks a lot like groq.py -- but they are separate services with separate
-keys. An OPENAI_API_KEY will never work against Groq's endpoint and
-vice versa, even though the request/response JSON looks almost identical.
+Sends chat messages to OpenAI's API (GPT-4o, GPT-4-turbo, etc.)
+and parses the response including tool/function calls.
+Uses OPENAI_API_KEY and OPENAI_MODEL from the environment.
+
+Swap to this provider by setting LLM_PROVIDER=openai in your .env file.
+Note: an OpenAI key will not work on Groq's endpoint and vice versa,
+even though the API shapes look almost identical.
 """
 from typing import Any
 

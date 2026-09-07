@@ -1,3 +1,11 @@
+"""
+schemas/order.py — Pydantic models for the orders API.
+
+  OrderItemOut      — one product line inside an order (name, qty, unit price, line total)
+  OrderOut          — full order detail (customer info, payment, status, grand total, list of items)
+  OrderListResponse — paginated list of orders with total count
+"""
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field

@@ -1,10 +1,11 @@
 """
-Admin orders API.
+orders.py — Admin orders API.
 
-Endpoints:
-  GET /api/orders          — paginated list with optional filters
-  GET /api/orders/{id}     — single order detail
-  PATCH /api/orders/{id}/status — update order status (paid / cancelled)
+Exposes:
+  GET  /api/orders              — paginated list of all orders, filterable by status, customer name/phone, and date range
+  GET  /api/orders/{id}         — full detail of a single order including all line items
+  PATCH /api/orders/{id}/status — update order status (pending_payment → paid or cancelled);
+                                  restores product stock automatically when an order is cancelled
 """
 from datetime import datetime
 

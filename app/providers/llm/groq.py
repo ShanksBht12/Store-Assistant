@@ -1,4 +1,13 @@
-"""Groq provider using Groq's OpenAI-compatible chat API."""
+"""
+providers/llm/groq.py — Groq LLM provider.
+
+Sends chat messages to Groq's OpenAI-compatible API (llama-3, mixtral, etc.)
+and parses the response including any tool/function calls the model makes.
+Uses GROQ_API_KEY and GROQ_MODEL from the environment.
+
+This is the default provider used in production.
+"""
+
 import re
 from typing import Any
 

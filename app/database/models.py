@@ -1,11 +1,14 @@
 """
-Phase 1 database models: products + product_price_history.
-Phase 2 additions: conversation_states (persisted chat history so the agent
-has memory across requests) + orders (created by the create_order tool).
+models.py — All SQLAlchemy database table definitions.
 
-CRM/HRM/omnichannel tables are added in later phases per the
-project's development order — keeping this file scoped to what
-Phase 1 actually needs avoids a giant premature schema.
+Tables defined here:
+  products               — the product catalog (name, brand, price, stock, image, category, color)
+  product_price_history  — price change log per product, used to show price trends
+  conversation_states    — persisted chat history per session so the agent remembers past messages
+  orders                 — one row per customer order (customer info, payment, status, grand total)
+  order_items            — one row per product line inside an order (name, qty, unit price, line total)
+  prompt_versions        — versioned history of the LLM system prompt; one row is marked active
+  OrderStatus            — enum: pending_payment / paid / cancelled
 """
 import enum
 import uuid
@@ -125,3 +128,34 @@ class OrderItem(Base):
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
+
+
+class PromptVersion(Base):
+    """
+    Versioned history of the LLM system prompt.
+
+    Each row stores a complete snapshot of the system prompt text with
+    metadata. Exactly one row has is_active=True — that is the prompt the
+    agent loads at runtime. Changing the active prompt requires setting
+    is_active=False on the current active row and is_active=True on the
+    new one (handled atomically by the registry and admin API).
+
+    Columns:
+      version       — auto-incrementing integer label (1, 2, 3, …)
+      label         — short human-readable name, e.g. "v1-initial", "v2-dspy-optimized"
+      prompt_text   — full system prompt string
+      notes         — free-text change notes, e.g. "Added sizing guidance"
+      is_active     — True for the currently deployed prompt (only one at a time)
+      created_by    — who created this version (e.g. "admin", "dspy-bootstrap")
+      created_at    — when it was created
+    """
+    __tablename__ = "prompt_versions"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    version    = Column(Integer, nullable=False, index=True)
+    label      = Column(String, nullable=False)
+    prompt_text = Column(String, nullable=False)
+    notes      = Column(String, nullable=True)
+    is_active  = Column(Integer, default=0, nullable=False)  # 1 = active, 0 = inactive
+    created_by = Column(String, nullable=True, default="admin")
+    created_at = Column(DateTime, default=_utcnow)

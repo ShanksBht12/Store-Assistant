@@ -1,3 +1,12 @@
+"""
+schemas/product.py — Pydantic models for product data returned by the API.
+
+  ProductOut           — full product detail sent to the frontend for the product card
+                         (id, sku, name, brand, category, color, image_url, price, stock)
+  ProductPriceHistoryOut — price history for a product including all past price entries
+  PriceHistoryEntry    — a single historical price point (date + price)
+"""
+
 from datetime import datetime
 
 from pydantic import BaseModel

@@ -26,13 +26,6 @@ const QR_CONFIG = {
   },
 };
 
-const SUGGESTIONS = [
-  { icon: "👕", text: "What clothes do you have?" },
-  { icon: "🕶️", text: "Show me sunglasses" },
-  { icon: "👟", text: "Show me Nike products" },
-  { icon: "📦", text: "Check my order status" },
-];
-
 const CAPABILITIES = [
   { icon: "🔎", text: "Browse clothing, shoes & accessories" },
   { icon: "💬", text: "Answer price & stock questions" },
@@ -45,11 +38,11 @@ function makeWelcome() {
   return {
     id: 0,
     role: "agent",
-    text: "Hi! I'm your Style Store Assistant. I can help you find clothing, shoes, sunglasses, watches, bags, kids items, and much more — check prices and stock, place orders, and track deliveries. What are you looking for today?",
+    text: "Namaste! How can I assist you today?",
     product: null,
     paymentMethod: null,
     ts: new Date(),
-    showSuggestions: true,
+    showSuggestions: false,
   };
 }
 
@@ -251,7 +244,6 @@ export default function App() {
               message={msg}
               onPreview={setPreviewProduct}
               onBuy={handleBuy}
-              onSuggestion={submit}
             />
           ))}
 
@@ -348,7 +340,7 @@ export default function App() {
 
 /* ── MessageGroup ─────────────────────────────────────────────────────── */
 
-function MessageGroup({ message, onPreview, onBuy, onSuggestion }) {
+function MessageGroup({ message, onPreview, onBuy }) {
   const isAgent = message.role === "agent";
 
   return (
@@ -359,22 +351,6 @@ function MessageGroup({ message, onPreview, onBuy, onSuggestion }) {
 
         <div className="bubble">
           <p>{message.text}</p>
-
-          {/* Suggestion chips — only on the welcome message */}
-          {isAgent && message.showSuggestions && (
-            <div className="suggestions">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s.text}
-                  type="button"
-                  className="chip"
-                  onClick={() => onSuggestion(s.text)}
-                >
-                  {s.icon} {s.text}
-                </button>
-              ))}
-            </div>
-          )}
 
           {/* Product card */}
           {isAgent && message.product && (

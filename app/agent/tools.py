@@ -1,18 +1,21 @@
 """
-Phase 2 tool registry -- OOP version.
+tools.py — All agent tools (functions the LLM can call during a conversation).
 
-Previously each tool was a bare function, referenced by name in a
-TOOL_FUNCTIONS dict, and the agent loop invoked it by looking up a string
-and calling it with **kwargs: `TOOL_FUNCTIONS[name](db, **arguments)`. That
-works, but it's dispatch-by-string with the schema (TOOL_SPECS) living
-completely separately -- nothing actually ties a function to its schema
-except both happening to use the same name string by convention. Nothing
-stops them drifting out of sync (e.g. renaming a function's parameter
-without updating its schema, or vice versa).
+Each tool is a class with:
+  - spec: the JSON schema the LLM uses to know when and how to call the tool
+  - run(): the actual Python logic that executes when the LLM calls it
 
-Here, each tool is a class: its name, its JSON schema, and its behavior are
-one object. The agent loop calls tool.run(db, **arguments) through the
-shared Tool interface -- polymorphism, not string-keyed function lookup.
+Tools defined here:
+  search_products    — search the product catalog by keyword, category, or color
+  get_product        — fetch full details of one product by its database ID
+  get_price_history  — get the price change history for a specific product
+  check_stock        — check live stock quantity for a specific product
+  create_order       — create a customer order with one or more items
+  get_order_status   — look up order(s) by order ID or customer phone number
+  validate_phone     — validate a Nepali mobile phone number format
+  validate_address   — validate that a delivery address has enough detail
+  update_order_payment — change the payment method on an existing pending order
+  get_best_sellers   — get the most-purchased products ranked by units sold
 """
 from __future__ import annotations
 
