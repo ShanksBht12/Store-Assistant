@@ -1,6 +1,6 @@
 # Store Assistant — AI Business Agent
 
-A conversational AI sales assistant for a shoe store, built with FastAPI, SQLAlchemy, React, and OpenRouter. Customers can browse products, place orders, and track deliveries through a natural chat interface. Store owners get an admin API to manage orders.
+A conversational AI sales assistant for a fashion and lifestyle store, built with FastAPI, SQLAlchemy, DSPy, React, and OpenRouter. Customers can browse products, place orders, and track deliveries through a natural chat interface. Store owners get an admin API to manage orders, update store information, and version the AI system prompt.
 
 ## Features
 
@@ -8,8 +8,15 @@ A conversational AI sales assistant for a shoe store, built with FastAPI, SQLAlc
 - Real LLM function/tool calling — the agent decides which tools to invoke per turn
 - Full conversation memory persisted per session in SQLite (`ConversationState`)
 - Remembers customer names, previous products, and context across messages
-- Suggestion chips on the welcome screen for quick-start prompts
+- DSPy architecture (`ChatSignature`, `SalesAgentModule`) with per-request `dspy.context()` for async-safe model switching
 - Markdown stripped from all replies — clean plain-text responses
+- Suggestion chips on the welcome screen for quick-start prompts
+
+### Dynamic Store Information
+- All store facts (name, location, phone, email, Instagram, opening hours, return/exchange/delivery policies, festive sale details) are stored in the database — not hardcoded anywhere
+- `GET /api/store` returns the current store info; `PUT /api/store` updates any field instantly
+- Agent calls the `get_store_info` tool whenever a customer asks about the store — answers always reflect the live database values
+- Change any store detail via the API and the chatbot picks it up on the very next message, no restart needed
 
 ### Products
 - Search by keyword, brand, color, or category
@@ -26,10 +33,18 @@ A conversational AI sales assistant for a shoe store, built with FastAPI, SQLAlc
 - Cash on Delivery supported
 - Order status lookup by order ID or phone number
 
+### Prompt Versioning
+- Every system prompt change is saved as a new row in `prompt_versions`
+- `GET /api/prompts`, `POST /api/prompts`, `POST /api/prompts/{id}/activate`
+- Activating a new prompt version takes effect on the next request — no restart needed
+- Designed for DSPy `BootstrapFewShot` optimization: save optimized prompts as new versions via the API
+
 ### Admin
 - `GET /api/orders` — paginated list with filters: status, name/phone search, date range
 - `GET /api/orders/{id}` — single order detail
 - `PATCH /api/orders/{id}/status` — mark as paid or cancelled (restores stock on cancel)
+- `GET /api/store` / `PUT /api/store` — read and update store information
+- `GET /api/prompts` / `POST /api/prompts` — manage system prompt versions
 - Interactive API docs at `http://localhost:8000/docs`
 
 ### Frontend
@@ -48,6 +63,7 @@ A conversational AI sales assistant for a shoe store, built with FastAPI, SQLAlc
 | Layer | Technology |
 |---|---|
 | Backend | FastAPI, Uvicorn, SQLAlchemy |
+| AI Framework | DSPy (signatures, modules, per-request context) |
 | Database | SQLite (`app.db`) |
 | LLM | OpenRouter (default) · OpenAI · Groq · Mock |
 | Frontend | React 18, Vite |
@@ -58,25 +74,33 @@ A conversational AI sales assistant for a shoe store, built with FastAPI, SQLAlc
 ai-business-agent/
 ├── app/
 │   ├── agent/
-│   │   ├── agent.py          # Phase 2 tool-calling loop + conversation memory
-│   │   └── tools.py          # Tool registry: search, stock, price history, order, status
+│   │   ├── agent.py          # Tool-calling loop + conversation memory
+│   │   ├── prompt.py         # DSPy ChatSignature, SalesAgentModule, PromptRegistry, SYSTEM_PROMPT
+│   │   ├── router.py         # Model selection, dspy.context() per request
+│   │   └── tools.py          # Tool registry: search, stock, order, store info, best sellers, etc.
 │   ├── api/
 │   │   ├── chat.py           # POST /api/chat
-│   │   └── orders.py         # GET|PATCH /api/orders admin endpoints
+│   │   ├── orders.py         # GET|PATCH /api/orders admin endpoints
+│   │   ├── prompts.py        # GET|POST /api/prompts prompt versioning
+│   │   └── store.py          # GET|PUT /api/store store information
 │   ├── database/
 │   │   ├── database.py       # SQLAlchemy engine and session
-│   │   └── models.py         # Product, Order, ConversationState, PriceHistory
+│   │   ├── models.py         # Product, Order, ConversationState, PriceHistory, PromptVersion, StoreInfo
+│   │   └── seed.py           # Product catalog seed + seed_store_info()
 │   ├── providers/llm/
 │   │   ├── base.py           # Abstract LLMProvider interface
 │   │   ├── openai_provider.py # OpenAI / OpenRouter
 │   │   ├── groq.py           # Groq
+│   │   ├── generic.py        # Generic OpenAI-compatible endpoint
 │   │   └── mock.py           # Offline mock for local dev
 │   ├── schemas/
 │   │   ├── chat.py           # ChatRequest / ChatResponse
 │   │   ├── order.py          # OrderOut / OrderListResponse
-│   │   └── product.py        # ProductOut / PriceHistoryOut
+│   │   ├── product.py        # ProductOut / PriceHistoryOut
+│   │   ├── prompt.py         # PromptVersionOut / PromptVersionCreate
+│   │   └── store.py          # StoreInfoOut / StoreInfoUpdate
 │   ├── config.py             # Settings loaded from .env
-│   └── main.py               # FastAPI app, CORS, router registration
+│   └── main.py               # FastAPI app, CORS, router registration, startup seeds
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx           # Chat UI, all components
@@ -84,7 +108,7 @@ ai-business-agent/
 │   │   ├── index.css         # Design system and all styles
 │   │   └── assets/           # eSewa and Khalti QR PNG cards
 │   └── index.html
-├── app.db                    # SQLite database (products + orders + conversations)
+├── app.db                    # SQLite database (auto-created on first run)
 ├── .env                      # Local secrets — never commit
 ├── .env.example              # Configuration template
 └── requirements.txt
@@ -128,6 +152,8 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 The backend runs at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
+The server automatically seeds the product catalog, store information, and initial prompt version on first startup — no manual DB step needed after the first `seed` run.
+
 ### 2. Frontend
 
 In a second terminal:
@@ -144,7 +170,7 @@ Open the URL printed by Vite — usually `http://localhost:5174`.
 
 ```bash
 python -m venv venv
-.\venv\Scripts\Activate.ps1
+source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # edit .env, then:
@@ -175,15 +201,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 POST /api/chat
 Content-Type: application/json
 
-{ "message": "How much are black shoes?", "conversation_id": "optional-uuid" }
+{ "message": "Where is the store?", "conversation_id": "optional-uuid" }
 ```
 
 Response:
 ```json
 {
   "conversation_id": "uuid",
-  "reply": "The Nike Air Max in Black is 13,000 NPR and we have 20 in stock.",
-  "product": { "id": 8, "name": "Nike Air Max", "color": "Black", ... },
+  "reply": "We're located at Durbar Marg, Kathmandu. Open Sunday to Friday, 10 AM to 7 PM.",
+  "product": null,
   "payment_method": null
 }
 ```
@@ -192,19 +218,62 @@ Response:
 
 `payment_method` is `"esewa"` or `"khalti"` when an order is confirmed with a digital payment — the frontend uses this to render the QR card.
 
+### Store Info
+
+```http
+GET /api/store
+PUT /api/store
+Content-Type: application/json
+
+{
+  "store_name": "Style Store",
+  "location": "Durbar Marg, Kathmandu",
+  "phone": "9800000006",
+  "email": "stylestore@gmail.com",
+  "instagram": "@stylestore",
+  "opening_hours": "Sunday to Friday, 10:00 AM to 7:00 PM.",
+  "return_policy": "...",
+  "exchange_policy": "...",
+  "delivery_info": "...",
+  "extra_notes": "..."
+}
+```
+
+All `PUT` fields are optional — only the supplied fields are updated. Changes are reflected in chatbot responses immediately.
+
 ### Orders (Admin)
 
 ```http
-GET  /api/orders?status=pending_payment&search=sandeep&page=1&page_size=20
+GET  /api/orders?status=pending_payment&search=john&page=1&page_size=20
 GET  /api/orders/{id}
 PATCH /api/orders/{id}/status?status=paid
 ```
 
+### Prompts (Admin)
+
+```http
+GET  /api/prompts
+POST /api/prompts          { "prompt_text": "...", "label": "v2", "activate": true }
+POST /api/prompts/{id}/activate
+```
+
 Full schema and try-it-out available at `/docs`.
+
+## Updating Store Information
+
+To change any store detail without touching the code:
+
+```powershell
+# Example: update phone number and location
+$body = '{"phone": "9812345678", "location": "Thamel, Kathmandu"}'
+Invoke-RestMethod -Uri "http://localhost:8000/api/store" -Method PUT -Body $body -ContentType "application/json"
+```
+
+The chatbot will use the new values on the very next customer message.
 
 ## Payment QR Codes
 
-After a successful eSewa or Khalti order the frontend automatically renders a payment QR card matching your reference design (dark background, provider logo, store name, merchant number, scan hint). Clicking the thumbnail opens a full-size zoom modal.
+After a successful eSewa or Khalti order the frontend automatically renders a payment QR card. Clicking the thumbnail opens a full-size zoom modal.
 
 To use your real merchant IDs, update the `merchantId` values in `QR_CONFIG` at the top of `frontend/src/App.jsx`, and replace the PNG files in `frontend/src/assets/` with QR images downloaded from your eSewa/Khalti merchant dashboard.
 
@@ -218,4 +287,4 @@ Set `LLM_PROVIDER=mock` in `.env` to run without any API key. The mock provider 
 - Use `.env.example` as the shareable template.
 - Rotate any key that has appeared in source, logs, or screenshots.
 - Before deploying publicly, restrict the CORS `allow_origin_regex` in `app/main.py` to your actual frontend domain.
-- The admin order endpoints have no authentication — add an API key or session check before exposing them outside localhost.
+- The admin order and store endpoints have no authentication — add an API key or session check before exposing them outside localhost.
