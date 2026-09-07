@@ -130,6 +130,32 @@ class OrderItem(Base):
     product = relationship("Product")
 
 
+class StoreInfo(Base):
+    """
+    Single-row table holding all mutable store facts (name, location, contact,
+    hours, policies, etc.).  The agent fetches this via the get_store_info tool
+    instead of reading a hardcoded string, so changing any value here is
+    instantly reflected in chatbot responses without a code change.
+
+    Only one row is expected (id=1).  The seed inserts it on first startup.
+    Update via PUT /api/store.
+    """
+    __tablename__ = "store_info"
+
+    id            = Column(Integer, primary_key=True, default=1)
+    store_name    = Column(String, nullable=False, default="Style Store")
+    location      = Column(String, nullable=True)
+    phone         = Column(String, nullable=True)
+    email         = Column(String, nullable=True)
+    instagram     = Column(String, nullable=True)
+    opening_hours = Column(String, nullable=True)
+    return_policy = Column(String, nullable=True)
+    exchange_policy = Column(String, nullable=True)
+    delivery_info = Column(String, nullable=True)
+    extra_notes   = Column(String, nullable=True)   # any other free-text facts
+    updated_at    = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class PromptVersion(Base):
     """
     Versioned history of the LLM system prompt.

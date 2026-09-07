@@ -26,7 +26,7 @@ from typing import Any
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.database.models import Order, OrderItem, OrderStatus, Product, ProductPriceHistory
+from app.database.models import Order, OrderItem, OrderStatus, Product, ProductPriceHistory, StoreInfo
 
 PAYMENT_METHODS = {"esewa", "khalti", "cash on delivery", "cod"}
 
@@ -1109,6 +1109,55 @@ class GetBestSellersTool(Tool):
         }
 
 
+class GetStoreInfoTool(Tool):
+    """Return all store facts from the database (name, location, phone, email,
+    Instagram, opening hours, return/exchange/delivery policies, and extra notes).
+    Call this whenever the customer asks anything about the store itself — its
+    location, contact details, hours, return policy, delivery, or any other
+    store-level information."""
+
+    name = "get_store_info"
+
+    @property
+    def spec(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": (
+                    "Retrieve up-to-date store information from the database: "
+                    "store name, location, phone/WhatsApp, email, Instagram handle, "
+                    "opening hours, return policy, exchange policy, delivery info, "
+                    "and any extra notes (e.g. festive sales). "
+                    "Call this for ANY question about the store itself — "
+                    "location, contact, hours, policies, or delivery times. "
+                    "Never use hardcoded values — always call this tool."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},   # no parameters needed — always returns the one row
+                },
+            },
+        }
+
+    def run(self, db: Session) -> dict[str, Any]:
+        row = db.get(StoreInfo, 1)
+        if row is None:
+            return {"error": "Store info not found in database."}
+        return {
+            "store_name":      row.store_name,
+            "location":        row.location,
+            "phone":           row.phone,
+            "email":           row.email,
+            "instagram":       row.instagram,
+            "opening_hours":   row.opening_hours,
+            "return_policy":   row.return_policy,
+            "exchange_policy": row.exchange_policy,
+            "delivery_info":   row.delivery_info,
+            "extra_notes":     row.extra_notes,
+        }
+
+
 # --- Registry ----------------------------------------------------------
 # One dict, built from the tool objects themselves -- TOOL_SPECS is derived
 # from TOOLS, not maintained as a second, independent list that could
@@ -1127,6 +1176,7 @@ TOOLS: dict[str, Tool] = {
         ValidateAddressTool(),
         UpdateOrderPaymentTool(),
         GetBestSellersTool(),
+        GetStoreInfoTool(),
     )
 }
 

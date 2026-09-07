@@ -18,7 +18,7 @@ from fastapi.responses import Response
 
 import dspy
 
-from app.api import chat, orders, prompts
+from app.api import chat, orders, prompts, store
 from app.config import get_settings
 from app.agent.router import _resolve_lm
 from app.database.database import Base, engine
@@ -41,7 +41,9 @@ except Exception as _e:
 
 # ── Seed initial prompt version if table is empty ────────────────────────────
 from app.agent.prompt import PromptRegistry
+from app.database.seed import seed_store_info
 PromptRegistry.seed_initial()
+seed_store_info()
 
 settings = get_settings()
 
@@ -71,6 +73,7 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(orders.router)
 app.include_router(prompts.router)
+app.include_router(store.router)
 
 
 @app.options("/api/chat")

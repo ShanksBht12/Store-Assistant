@@ -10,7 +10,7 @@ Also backfills price history for existing products that have none.
 from datetime import datetime
 
 from app.database.database import Base, SessionLocal, engine
-from app.database.models import Product, ProductPriceHistory
+from app.database.models import Product, ProductPriceHistory, StoreInfo
 
 
 PRODUCTS = [
@@ -331,3 +331,51 @@ def backfill_price_history():
 if __name__ == "__main__":
     seed()
     backfill_price_history()
+    seed_store_info()
+
+
+def seed_store_info() -> None:
+    """Insert the initial store information row if the table is empty.
+    Safe to re-run — skips if a row already exists."""
+    db = SessionLocal()
+    try:
+        if db.query(StoreInfo).count() == 0:
+            db.add(StoreInfo(
+                id=1,
+                store_name="Style Store",
+                location="Durbar Marg, Kathmandu",
+                phone="9800000006",
+                email="stylestore@gmail.com",
+                instagram="@stylestore",
+                opening_hours=(
+                    "Sunday to Friday, 10:00 AM to 7:00 PM. "
+                    "Saturdays are off or have reduced hours."
+                ),
+                return_policy=(
+                    "No cash refunds. Store credit only. "
+                    "Returns accepted within 3 to 7 days of purchase. "
+                    "Items must be unused and have original tags attached."
+                ),
+                exchange_policy=(
+                    "Size and color exchanges are accepted within 24 hours to 3 days of purchase. "
+                    "The buyer is responsible for round-trip delivery costs."
+                ),
+                delivery_info=(
+                    "Kathmandu Valley: 1 to 2 business days, Cash on Delivery available. "
+                    "Major cities nationwide: 2 to 5 business days, small advance payment required."
+                ),
+                extra_notes=(
+                    "Festive Sales (e.g. Dashain): items below NPR 8,000 get up to 45% off; "
+                    "items above NPR 8,000 get 20% off. Follow @stylestore on Instagram for announcements. "
+                    "No warranty on any products. Prices are fixed — no discounts or promo codes outside festive sales."
+                ),
+            ))
+            db.commit()
+            print("Seeded store info.")
+        else:
+            print("Store info already exists — skipped.")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
