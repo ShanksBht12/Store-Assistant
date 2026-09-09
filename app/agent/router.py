@@ -4,8 +4,10 @@ then delegates to the business-agnostic agent loop.
 
 WHAT THIS FILE DOES
   1. Resolves TenantContext from the DB for the active tenant.
-  2. Resolves the LLMProvider for that tenant (per-tenant credentials from DB,
-     falling back to process env vars — see get_llm_provider_for_tenant()).
+  2. Resolves the LLMProvider for that tenant via get_llm_provider_for_tenant().
+     Resolution order: tenant DB fields (llm_provider/api_key/api_base/model)
+     → process-level env vars. No per-request model override exists — the model
+     is always determined server-side from tenant configuration.
   3. Instantiates the correct ToolRegistry for that tenant's business type.
   4. Delegates to handle_chat_message() with all three injected.
 
@@ -20,11 +22,6 @@ ADDING A NEW BUSINESS TYPE
   2. Add a `business_type` field to TenantConfig.
   3. Add a branch here: if tenant.business_type == "agency": registry = AgencyToolRegistry(tenant)
   agent.py, prompt.py, and the LLM provider layer stay completely unchanged.
-
-NOTE: DSPy (_resolve_lm, _build_dspy_lm, dspy.context) has been removed.
-  The LLMProvider ABC is the one and only model-selection mechanism.
-  Model overrides per request are handled by get_llm_provider_for_tenant()
-  accepting a model_override parameter when needed (future work).
 """
 from __future__ import annotations
 
@@ -37,24 +34,19 @@ from app.providers.llm import get_llm_provider_for_tenant
 
 
 async def route_chat(
-    db:             Session,
+    db:              Session,
     conversation_id: str,
-    message:        str,
-    model_override: str | None = None,
-    tenant_id:      str = "default",
+    message:         str,
+    tenant_id:       str = "default",
 ) -> tuple[str, dict | None, str | None]:
     """
     Main router function called by the API endpoint (chat.py).
 
     Steps:
       1. Resolve TenantContext (prompt rendering, phone/payment rules, LLM config).
-      2. Resolve LLMProvider for this tenant (per-tenant credentials → env fallback).
+      2. Resolve LLMProvider for this tenant (tenant DB config → env var fallback).
       3. Instantiate the correct ToolRegistry for this tenant's business type.
       4. Delegate to handle_chat_message() with all three injected.
-
-    model_override is accepted for API compatibility but currently passed
-    through to the tenant context resolution — full per-request model
-    switching can be wired here when needed without touching agent.py.
 
     Returns (reply_text, card_data_or_None, payment_method_or_None).
     """

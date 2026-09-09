@@ -67,7 +67,6 @@ async def chat(
             db              = db,
             conversation_id = conversation_id,
             message         = request.message,
-            model_override  = request.model,
             tenant_id       = tenant.tenant_id,
         )
     except RuntimeError as exc:

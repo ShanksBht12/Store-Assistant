@@ -2,16 +2,17 @@
 schemas/chat.py — Pydantic models for the chat API request and response.
 
   ChatRequest   — what the frontend sends: message text + optional conversation_id
-                  + optional model override for per-request model selection
   ChatResponse  — what the API returns: reply text, optional rich card data,
                   optional payment QR method, conversation_id
 
 NOTE: `card_data` replaces the old `product` field. It is a generic dict so
-the schema is not coupled to the retail domain — a marketing agency adapter
-can return campaign data, a booking adapter can return booking summaries, etc.
-The frontend maps the dict to the appropriate UI component based on its shape.
-For backward compatibility, the field is still serialised as `product` in the
-JSON response so existing frontend code continues to work unchanged.
+the schema is not coupled to the retail domain. The frontend maps it to the
+appropriate UI component based on its shape. Serialised as `product` in the
+JSON response for frontend backward compatibility.
+
+Model selection is server-side only, resolved from the tenant's configuration
+(TenantContext.llm_model → env var fallback). There is no per-request model
+override — the caller cannot change the model via the API.
 """
 from typing import Any
 
@@ -21,15 +22,6 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     message:         str        = Field(..., min_length=1, max_length=4000)
     conversation_id: str | None = None
-    model:           str | None = Field(
-        default=None,
-        description=(
-            "Optional per-request model override. Pass any LiteLLM model string "
-            "to use a different model for this turn only. Examples: "
-            "'anthropic/claude-3-5-sonnet', 'groq/llama-3.1-70b', 'ollama/llama3.2'. "
-            "Omit to use the server's default (LLM_PROVIDER in .env)."
-        ),
-    )
 
 
 class ChatResponse(BaseModel):
