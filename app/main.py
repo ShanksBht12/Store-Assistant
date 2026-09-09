@@ -4,63 +4,45 @@ main.py — FastAPI application entry point.
 Responsibilities:
   - Creates the FastAPI app instance
   - Registers CORS middleware (allows the frontend dev server to call the API)
-  - Mounts the /api/chat and /api/orders routers
-  - Serves the compiled React frontend (frontend/dist/) as static files
-    so the whole app (API + UI) runs from a single server process
+  - Mounts all API routers
+  - Creates DB tables on startup and seeds initial data
 
 Start the server with:
     uvicorn app.main:app --reload
+
+NOTE: DSPy (dspy.configure, _resolve_lm) has been removed. The agent loop
+uses the LLMProvider ABC directly — there is one model-selection path.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-import dspy
-
 from app.api import chat, orders, prompts, store
 from app.config import get_settings
-from app.agent.router import _resolve_lm
 from app.database.database import Base, engine
 
 settings = get_settings()
 
 Base.metadata.create_all(bind=engine)
 
-# ── Configure DSPy once at startup from the main thread ──────────────────────
-# dspy.configure() must be called from the main thread/task exactly once.
-# After this, every async request uses dspy.context(lm=...) to override
-# the LM per-task without touching the global state.
-try:
-    default_lm = _resolve_lm()          # reads LLM_PROVIDER + credentials from .env
-    dspy.configure(lm=default_lm)
-except Exception as _e:
-    # If credentials are missing (e.g. running without .env), skip DSPy config.
-    # The agent falls back to raw LLM output when DSPy is unconfigured.
-    pass
-
-# ── Seed initial prompt version if table is empty ────────────────────────────
+# ── Startup seeds ─────────────────────────────────────────────────────────────
 from app.agent.prompt import PromptRegistry
 from app.database.seed import seed_store_info, seed_tenant_config
 PromptRegistry.seed_initial()
 seed_store_info()
 seed_tenant_config()
 
-settings = get_settings()
-
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(
     title="Store Assistant API",
     description=(
-        "Backend for the Store Assistant — an AI-powered shoe store chatbot. "
-        "\n\n"
+        "Backend for the Store Assistant — an AI-powered retail chatbot.\n\n"
         "**Chat** — send a message and receive a reply from the AI agent.\n\n"
         "**Orders** — admin endpoints to list, view, and update order status."
     ),
     version="1.0.0",
     docs_url="/docs",
-    redoc_url=None,  # disable the redundant ReDoc UI
+    redoc_url=None,
 )
 
 app.add_middleware(

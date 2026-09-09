@@ -1,23 +1,7 @@
 """
-prompt.py — DSPy Signature and Module for the retail sales assistant.
+prompt.py — Prompt template and PromptRegistry for the retail sales assistant.
 
-WHY DSPY?
-  Raw prompt strings (the old approach) are opaque blobs — hard to version,
-  test, or improve systematically. DSPy treats prompts as structured programs:
-  - ChatSignature declares WHAT the model should do (inputs, outputs, instructions).
-  - SalesAgentModule is the executable unit that DSPy can later optimize
-    automatically using BootstrapFewShot or MIPROv2 on real conversation examples,
-    without manually rewriting prompt text.
-
-HOW IT FITS THE AGENT LOOP:
-  agent.py still drives the full tool-calling loop (tool calls, history, DB).
-  DSPy is used for the one part that benefits from optimization: the
-  system-prompt injection and the final plain-text reply generation.
-  Tool-calling turns bypass DSPy and go directly to the underlying LLM via
-  the existing LLMProvider.chat() interface (DSPy doesn't yet handle arbitrary
-  tool schemas as cleanly as raw API calls).
-
-PROMPT TEMPLATE (PROMPT_TEMPLATE constant):
+PROMPT TEMPLATE (PROMPT_TEMPLATE constant)
   A generic, tenant-neutral template with {{ variable }} slots.
   At runtime, PromptRegistry.render_for_tenant(tenant) fills in the slots
   from the tenant's TenantContext (display_name, product_taxonomy,
@@ -28,8 +12,14 @@ PROMPT TEMPLATE (PROMPT_TEMPLATE constant):
     - Store name / location / contact details  → fetched via get_store_info tool
     - Phone number regex / payment method list → injected from TenantContext
     - Product category list / taxonomy        → injected from TenantContext
+
+NOTE: DSPy (ChatSignature, SalesAgentModule, dspy.configure) has been removed.
+  The agent loop uses the LLMProvider ABC directly for all LLM calls — there
+  is one model-selection path, not two. PromptRegistry is pure Python with no
+  DSPy dependency. If prompt optimisation via BootstrapFewShot is needed in
+  future, it should be added as an offline training script, not as dead wiring
+  in the request path.
 """
-import dspy
 
 
 # ── Generic prompt template ───────────────────────────────────────────────────
@@ -130,85 +120,6 @@ Provide appropriate care advice based on the product category. Follow best pract
 - When a product search returns no results, be helpful and specific — mention what they searched for and offer an alternative.
 - Never use the same canned phrase twice in a row. Vary your wording naturally.
 """
-
-
-# ── DSPy Signature ────────────────────────────────────────────────────────────
-# A Signature declares the input/output contract for one "step" of reasoning.
-# DSPy uses this to build and later optimize the prompt automatically.
-#
-# IMPORTANT: This signature is for the final plain-text reply step only
-# (no tool calls). The full tool-calling loop in agent.py bypasses DSPy and
-# calls the underlying LLM provider directly — tool calling requires
-# exact JSON schemas that DSPy does not yet handle end-to-end.
-
-class ChatSignature(dspy.Signature):
-    """Retail sales assistant. Respond to the customer based on the
-    conversation history provided. Be concise, friendly, and accurate.
-    Never use Markdown. Never invent product details."""
-
-    conversation_history: str = dspy.InputField(
-        desc="Full conversation so far as a JSON-serialized list of role/content dicts"
-    )
-    user_message: str = dspy.InputField(
-        desc="The latest message from the customer"
-    )
-    tool_results: str = dspy.InputField(
-        desc="JSON-serialized tool call results from this turn, or empty string if none"
-    )
-    reply: str = dspy.OutputField(
-        desc="Plain-text reply to the customer. No Markdown, no URLs, no bullet points."
-    )
-
-
-# ── DSPy Module ───────────────────────────────────────────────────────────────
-# A Module wraps one or more Predict/ChainOfThought steps.
-# This is the unit DSPy can optimize: call dspy.BootstrapFewShot(metric, ...)
-# on a SalesAgentModule instance and it will automatically improve the prompts
-# using examples from real conversations.
-
-class SalesAgentModule(dspy.Module):
-    """
-    DSPy module for the retail sales assistant's plain-text reply step.
-
-    Usage:
-        module = SalesAgentModule()
-        result = module(
-            conversation_history=json.dumps(messages),
-            user_message=user_message,
-            tool_results=json.dumps(tool_results),
-        )
-        reply = result.reply
-
-    To optimize with real examples later:
-        from dspy.teleprompt import BootstrapFewShot
-        optimized = BootstrapFewShot(metric=your_metric).compile(
-            SalesAgentModule(), trainset=examples
-        )
-    """
-
-    def __init__(self):
-        super().__init__()
-        # Predict is the standard DSPy predictor — one LLM call per forward().
-        # Switch to dspy.ChainOfThought(ChatSignature) for step-by-step reasoning.
-        self.predict = dspy.Predict(ChatSignature)
-
-    def forward(
-        self,
-        conversation_history: str,
-        user_message: str,
-        tool_results: str = "",
-    ) -> dspy.Prediction:
-        return self.predict(
-            conversation_history=conversation_history,
-            user_message=user_message,
-            tool_results=tool_results,
-        )
-
-
-# ── Module singleton ──────────────────────────────────────────────────────────
-# One instance reused across all requests (DSPy modules are stateless between
-# calls; state lives in the conversation history passed as input).
-sales_agent_module = SalesAgentModule()
 
 
 # ── Prompt Registry ───────────────────────────────────────────────────────────
