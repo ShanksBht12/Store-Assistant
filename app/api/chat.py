@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.rate_limiter import get_rate_limiter
 from app.agent.router import route_chat
-from app.config import get_tenant_context
+from app.config import find_tenant_context, get_tenant_context
 from app.database.database import get_db
 from app.schemas.chat import ChatRequest, ChatResponse
 
@@ -40,16 +40,19 @@ def _resolve_tenant(
     """
     Resolve TenantContext from the X-Tenant-ID header.
 
-    - Header absent → use "default" (backward-compatible for single-tenant deploys).
-    - Header present but tenant unknown or inactive → HTTP 404.
+    - Header absent → use get_tenant_context("default") with its built-in
+      fallback, so single-tenant deployments work with no configuration.
+    - Header present → use find_tenant_context() which returns None when
+      the row is missing or inactive. That produces an unambiguous 404
+      rather than silently falling back to a generic config.
     """
-    tenant_id = x_tenant_id.strip() if x_tenant_id else "default"
-    tenant = get_tenant_context(tenant_id)
+    if not x_tenant_id:
+        # No header — safe fallback path for single-tenant deploys
+        return get_tenant_context("default")
 
-    # get_tenant_context() falls back to a built-in default when the DB row
-    # is missing. If a caller explicitly named a tenant that doesn't exist,
-    # reject the request rather than silently serving them the default config.
-    if x_tenant_id and tenant.tenant_id != tenant_id:
+    tenant_id = x_tenant_id.strip()
+    tenant = find_tenant_context(tenant_id)
+    if tenant is None:
         raise HTTPException(
             status_code=404,
             detail=f"Tenant '{tenant_id}' not found or inactive.",
