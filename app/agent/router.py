@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 from app.agent.agent import handle_chat_message
 from app.agent.retail_registry import RetailToolRegistry
 from app.config import get_settings, get_tenant_context
+from app.providers.llm import get_llm_provider_for_tenant
 
 settings = get_settings()
 
@@ -110,10 +111,11 @@ async def route_chat(
     lm     = _resolve_lm(model_override)
     tenant = get_tenant_context(tenant_id)
 
+    # Resolve the per-tenant LLM provider (credentials + model from DB,
+    # falling back to process env vars when not set on the tenant).
+    llm = get_llm_provider_for_tenant(tenant)
+
     # ── Registry selection ────────────────────────────────────────────────────
-    # This is the composition root for business-type adapters.
-    # To add a new business type, add a branch here keyed on a tenant config
-    # field (e.g. tenant.business_type) and return the matching registry.
     registry = RetailToolRegistry(tenant)
 
     with dspy.context(lm=lm):
@@ -123,4 +125,5 @@ async def route_chat(
             message=message,
             registry=registry,
             tenant=tenant,
+            llm=llm,
         )

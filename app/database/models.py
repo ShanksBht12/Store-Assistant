@@ -183,6 +183,15 @@ class TenantConfig(Base):
     # 0 = unlimited (use for internal/trusted tenants).
     requests_per_minute = Column(Integer, nullable=False, default=20)
     requests_per_day    = Column(Integer, nullable=False, default=1000)
+    # ── Per-tenant LLM credentials ────────────────────────────────────────────
+    # When set, these override the process-level LLM_PROVIDER env vars for
+    # this tenant's requests. This lets different tenants use different
+    # models, providers, or API keys without a process restart.
+    # Leave all four as None to fall back to the process-level defaults.
+    llm_provider = Column(String, nullable=True)   # 'groq' | 'openai' | 'generic' | None
+    llm_api_key  = Column(String, nullable=True)   # provider API key for this tenant
+    llm_api_base = Column(String, nullable=True)   # endpoint base URL override
+    llm_model    = Column(String, nullable=True)   # model name override
     is_active        = Column(Integer, nullable=False, default=1)
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)

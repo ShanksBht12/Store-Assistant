@@ -16,19 +16,24 @@ import httpx
 from app.config import get_settings
 from app.providers.llm.base import LLMProvider
 
-settings = get_settings()
-
 
 class GroqProvider(LLMProvider):
-    def __init__(self):
-        if not settings.GROQ_API_KEY:
+    def __init__(
+        self,
+        api_key:  str | None = None,
+        api_base: str | None = None,
+        model:    str | None = None,
+    ):
+        s = get_settings()
+        resolved_key = api_key or s.GROQ_API_KEY
+        if not resolved_key:
             raise RuntimeError(
                 "GROQ_API_KEY is not set. Add it to your .env file -- "
                 "never hard-code it in source."
             )
-        self.api_key = settings.GROQ_API_KEY
-        self.base_url = settings.GROQ_API_BASE
-        self.model = settings.GROQ_MODEL
+        self.api_key  = resolved_key
+        self.base_url = api_base or s.GROQ_API_BASE
+        self.model    = model    or s.GROQ_MODEL
 
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Private helper (leading underscore = not part of the public
@@ -61,7 +66,7 @@ class GroqProvider(LLMProvider):
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": settings.MAX_OUTPUT_TOKENS,
+            "max_tokens": get_settings().MAX_OUTPUT_TOKENS,
             "reasoning_format": "hidden",
         }
         if tools:

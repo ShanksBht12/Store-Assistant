@@ -17,36 +17,24 @@ from app.config import get_settings
 from app.providers.llm.base import LLMProvider
 
 class OpenAIProvider(LLMProvider):
-    # extends LLMProvider -- this is what makes it "an LLMProvider" as far
-    # as agent.py/orchestrator.py are concerned. They never import THIS
-    # class by name; they only ever call get_llm_provider(), which decides
-    # whether to hand back this or GroqProvider.
-
-    def __init__(self):
-        # Read settings inside __init__ so the cached singleton is resolved
-        # at instantiation time (after .env is fully loaded), not at module
-        # import time.
+    def __init__(
+        self,
+        api_key:  str | None = None,
+        api_base: str | None = None,
+        model:    str | None = None,
+    ):
         s = get_settings()
-
-        # Fail loudly and immediately if the key is missing, rather than
-        # letting the app start and only discovering the problem on the
-        # first real chat request.
-        if not s.OPENAI_API_KEY:
+        resolved_key = api_key or s.OPENAI_API_KEY
+        if not resolved_key:
             raise RuntimeError(
                 "OPENAI_API_KEY is not set. Add it to your .env file -- "
                 "never hard-code it in source."
             )
-        self.api_key = s.OPENAI_API_KEY
-        # https://openrouter.ai/api/v1 when using OpenRouter, or
-        # https://api.openai.com/v1 for native OpenAI -- kept as a setting
-        # so you can switch providers without touching code.
-        self.base_url = s.OPENAI_API_BASE.rstrip("/")
-        # e.g. "openai/gpt-4o-mini" for OpenRouter, "gpt-4o-mini" for native OpenAI.
-        self.model = s.OPENAI_MODEL
+        self.api_key           = resolved_key
+        self.base_url          = (api_base or s.OPENAI_API_BASE).rstrip("/")
+        self.model             = model    or s.OPENAI_MODEL
         self.max_output_tokens = s.MAX_OUTPUT_TOKENS
-        # Detect whether we're talking to OpenRouter so we can add the
-        # required HTTP-Referer header (OpenRouter returns 401 without it).
-        self._is_openrouter = "openrouter.ai" in self.base_url
+        self._is_openrouter    = "openrouter.ai" in self.base_url
 
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         # Leading underscore = private to this class. Nothing outside

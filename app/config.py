@@ -98,6 +98,11 @@ class TenantContext:
     prompt_template:     str | None
     requests_per_minute: int = 20    # 0 = unlimited
     requests_per_day:    int = 1000  # 0 = unlimited
+    # Per-tenant LLM overrides — None means fall back to process-level env vars
+    llm_provider:        str | None = None
+    llm_api_key:         str | None = None
+    llm_api_base:        str | None = None
+    llm_model:           str | None = None
 
 
 def get_tenant_context(tenant_id: str = "default") -> "TenantContext":
@@ -130,6 +135,10 @@ def get_tenant_context(tenant_id: str = "default") -> "TenantContext":
                     prompt_template      = row.prompt_template,
                     requests_per_minute  = row.requests_per_minute,
                     requests_per_day     = row.requests_per_day,
+                    llm_provider         = row.llm_provider,
+                    llm_api_key          = row.llm_api_key,
+                    llm_api_base         = row.llm_api_base,
+                    llm_model            = row.llm_model,
                 )
         finally:
             db.close()
@@ -150,4 +159,8 @@ def get_tenant_context(tenant_id: str = "default") -> "TenantContext":
         prompt_template      = None,
         requests_per_minute  = 20,
         requests_per_day     = 1000,
+        llm_provider         = None,
+        llm_api_key          = None,
+        llm_api_base         = None,
+        llm_model            = None,
     )

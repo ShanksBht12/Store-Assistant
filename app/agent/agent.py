@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 from app.agent.prompt import PromptRegistry
 from app.agent.registry import ToolRegistry
 from app.database.models import ConversationState
-from app.providers.llm import get_llm_provider
+from app.providers.llm.base import LLMProvider
 
 if TYPE_CHECKING:
     from app.config import TenantContext
@@ -160,6 +160,7 @@ async def handle_chat_message(
     message:         str,
     registry:        ToolRegistry,
     tenant:          "TenantContext",
+    llm:             LLMProvider,
 ) -> tuple[str, dict | None, str | None]:
     """
     Run one user turn through the agent loop.
@@ -171,13 +172,12 @@ async def handle_chat_message(
     message         : the customer's latest message
     registry        : ToolRegistry implementation for this tenant/business type
     tenant          : TenantContext for prompt rendering and digital_payments set
+    llm             : LLMProvider resolved for this tenant — injected by router.py
+                      so agent.py never calls the global provider factory directly
 
     Returns
     -------
     (reply_text, card_data, payment_method)
-      reply_text     : plain-text assistant reply
-      card_data      : dict for the frontend to render as a rich card, or None
-      payment_method : lowercase payment method string for QR display, or None
     """
     # ── Load or create conversation state ────────────────────────────────────
     state = db.get(ConversationState, conversation_id)
@@ -196,7 +196,6 @@ async def handle_chat_message(
     messages = list(last_clean_messages)
     messages.append({"role": "user", "content": message})
 
-    llm = get_llm_provider()
     tool_calls_made: list[dict[str, Any]] = []
     digital_payments = set(tenant.digital_payments)
 

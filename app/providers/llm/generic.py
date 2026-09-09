@@ -36,24 +36,32 @@ class GenericOpenAIProvider(LLMProvider):
     are inherited from LLMProvider for free.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        api_key:  str | None = None,
+        api_base: str | None = None,
+        model:    str | None = None,
+    ):
         s = get_settings()
-        if not s.GENERIC_API_KEY:
+        resolved_key  = api_key  or s.GENERIC_API_KEY
+        resolved_base = api_base or s.GENERIC_API_BASE
+        resolved_model = model   or s.GENERIC_MODEL
+
+        if not resolved_key:
             raise RuntimeError(
                 "GENERIC_API_KEY is not set. Add it to your .env file.\n"
                 "If your endpoint requires no key (e.g. local Ollama), set GENERIC_API_KEY=none"
             )
-        if not s.GENERIC_API_BASE:
+        if not resolved_base:
             raise RuntimeError("GENERIC_API_BASE is not set. Add the endpoint base URL to your .env file.")
-        if not s.GENERIC_MODEL:
+        if not resolved_model:
             raise RuntimeError("GENERIC_MODEL is not set. Add the model name to your .env file.")
 
-        self.api_key   = s.GENERIC_API_KEY
-        self.base_url  = s.GENERIC_API_BASE.rstrip("/")
-        self.model     = s.GENERIC_MODEL
+        self.api_key    = resolved_key
+        self.base_url   = resolved_base.rstrip("/")
+        self.model      = resolved_model
         self.max_tokens = s.MAX_OUTPUT_TOKENS
 
-        # Optional extra headers (e.g. OpenRouter requires HTTP-Referer)
         try:
             self.extra_headers: dict[str, str] = (
                 json.loads(s.GENERIC_EXTRA_HEADERS) if s.GENERIC_EXTRA_HEADERS else {}
