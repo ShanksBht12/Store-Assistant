@@ -5,8 +5,10 @@ Exposes:
   POST /api/chat
 
 Request flow:
-  1. Resolve TenantContext for this request (default tenant for now; extend
-     to header/JWT-based tenant resolution for true multi-tenancy).
+  1. Identify the tenant from the X-Tenant-ID request header.
+     Falls back to "default" when the header is absent, so single-tenant
+     deployments need no configuration change.
+     Returns HTTP 404 if the header is present but names an unknown/inactive tenant.
   2. Enforce per-tenant rate limits (requests_per_minute, requests_per_day)
      from TenantContext. Returns HTTP 429 with a Retry-After header if exceeded.
   3. Route through router.py → agent loop → ToolRegistry → LLM.
@@ -19,7 +21,7 @@ Returns:
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.agent.rate_limiter import get_rate_limiter
@@ -31,16 +33,47 @@ from app.schemas.chat import ChatRequest, ChatResponse
 router = APIRouter(tags=["Chat"])
 
 
+def _resolve_tenant(
+    x_tenant_id: str | None,
+    db: Session,
+):
+    """
+    Resolve TenantContext from the X-Tenant-ID header.
+
+    - Header absent → use "default" (backward-compatible for single-tenant deploys).
+    - Header present but tenant unknown or inactive → HTTP 404.
+    """
+    tenant_id = x_tenant_id.strip() if x_tenant_id else "default"
+    tenant = get_tenant_context(tenant_id)
+
+    # get_tenant_context() falls back to a built-in default when the DB row
+    # is missing. If a caller explicitly named a tenant that doesn't exist,
+    # reject the request rather than silently serving them the default config.
+    if x_tenant_id and tenant.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tenant '{tenant_id}' not found or inactive.",
+        )
+    return tenant
+
+
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(
-    request:  ChatRequest,
-    response: Response,
-    db:       Session = Depends(get_db),
+    request:      ChatRequest,
+    response:     Response,
+    db:           Session = Depends(get_db),
+    x_tenant_id:  str | None = Header(
+        default=None,
+        alias="X-Tenant-ID",
+        description=(
+            "Optional tenant identifier. Omit for single-tenant deployments "
+            "(resolves to the 'default' tenant). Supply to route the request "
+            "to a specific tenant's configuration, prompt, and LLM credentials."
+        ),
+    ),
 ):
     # ── Resolve tenant ────────────────────────────────────────────────────────
-    # Currently always "default". To support multiple tenants, extract a
-    # tenant_id from a request header (e.g. X-Tenant-ID) or a JWT claim here.
-    tenant = get_tenant_context("default")
+    tenant = _resolve_tenant(x_tenant_id, db)
 
     # ── Per-tenant rate limiting ──────────────────────────────────────────────
     limiter = get_rate_limiter()
