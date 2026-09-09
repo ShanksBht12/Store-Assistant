@@ -15,7 +15,9 @@ Router / per-request model override
   override the default model for that turn only (router.py handles this).
 """
 import os
+from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import List
 
 from dotenv import load_dotenv
 
@@ -75,3 +77,71 @@ class Settings:
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+# ── TenantContext ─────────────────────────────────────────────────────────────
+# Resolved at request time from the tenant_configs DB table.
+# Passed into tools and the prompt renderer so all region/business-specific
+# config comes from here, not from module-level constants in tools.py.
+
+@dataclass
+class TenantContext:
+    tenant_id:        str
+    display_name:     str
+    phone_regex:      str               # compiled at use time via re.compile()
+    phone_hint:       str               # shown to user when phone is invalid
+    payment_methods:  List[str]         # all accepted methods (lowercase)
+    digital_payments: List[str]         # subset that trigger QR codes
+    currency:         str
+    locale:           str
+    product_taxonomy: str               # injected into the prompt template
+    prompt_template:  str | None        # Jinja2-style; None → use global PromptVersion
+
+
+def get_tenant_context(tenant_id: str = "default") -> "TenantContext":
+    """
+    Load TenantContext for the given tenant_id from the database.
+    Falls back to a safe built-in default if the DB is unavailable or the
+    row does not exist — so the system always has a working configuration.
+
+    Call this once per request in router.py and pass the result into the
+    agent and tools. Do NOT cache the result long-term; tenant config can
+    be updated at runtime via the DB without a restart.
+    """
+    try:
+        from app.database.database import SessionLocal
+        from app.database.models import TenantConfig
+        db = SessionLocal()
+        try:
+            row = db.get(TenantConfig, tenant_id)
+            if row and row.is_active:
+                return TenantContext(
+                    tenant_id        = row.tenant_id,
+                    display_name     = row.display_name,
+                    phone_regex      = row.phone_regex,
+                    phone_hint       = row.phone_hint,
+                    payment_methods  = list(row.payment_methods or []),
+                    digital_payments = list(row.digital_payments or []),
+                    currency         = row.currency,
+                    locale           = row.locale,
+                    product_taxonomy = row.product_taxonomy or "",
+                    prompt_template  = row.prompt_template,
+                )
+        finally:
+            db.close()
+    except Exception:
+        pass  # DB unavailable — fall through to built-in default
+
+    # ── Built-in fallback (generic, no region assumptions) ────────────────────
+    return TenantContext(
+        tenant_id        = "default",
+        display_name     = "My Store",
+        phone_regex      = r"^\+?\d{7,15}$",
+        phone_hint       = "Please enter a valid phone number (7–15 digits).",
+        payment_methods  = ["card", "cash on delivery"],
+        digital_payments = [],
+        currency         = "USD",
+        locale           = "en-US",
+        product_taxonomy = "",
+        prompt_template  = None,
+    )

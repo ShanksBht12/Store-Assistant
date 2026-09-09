@@ -10,7 +10,7 @@ Also backfills price history for existing products that have none.
 from datetime import datetime
 
 from app.database.database import Base, SessionLocal, engine
-from app.database.models import Product, ProductPriceHistory, StoreInfo
+from app.database.models import Product, ProductPriceHistory, StoreInfo, TenantConfig
 
 
 PRODUCTS = [
@@ -332,6 +332,60 @@ if __name__ == "__main__":
     seed()
     backfill_price_history()
     seed_store_info()
+    seed_tenant_config()
+
+
+def seed_tenant_config() -> None:
+    """Insert the default tenant configuration row if it does not exist.
+    All region/business-specific settings that the agent uses at runtime
+    are stored here instead of being hardcoded in source.
+
+    To add a new tenant, insert another row with a different tenant_id and
+    point requests to it via get_tenant_context(tenant_id).
+
+    Safe to re-run — skips if the 'default' row already exists.
+    """
+    db = SessionLocal()
+    try:
+        if db.get(TenantConfig, "default") is None:
+            db.add(TenantConfig(
+                tenant_id="default",
+                display_name="Style Store",
+                # Nepal mobile: 10 digits starting with 96/97/98
+                phone_regex=r"^9[678]\d{8}$",
+                phone_hint=(
+                    "Please enter a valid Nepali mobile number "
+                    "(10 digits starting with 96, 97, or 98)."
+                ),
+                payment_methods=["esewa", "khalti", "cash on delivery", "cod"],
+                digital_payments=["esewa", "khalti"],
+                currency="NPR",
+                locale="ne-NP",
+                product_taxonomy=(
+                    "The store sells a wide range of wearable products including:\n"
+                    "Men's clothing: tops, bottoms (jeans, chinos, shorts), outerwear (jackets, hoodies, coats)\n"
+                    "Women's clothing: tops, bottoms, dresses, outerwear\n"
+                    "Kids clothing: boys and girls (tops, bottoms, dresses, sets)\n"
+                    "Footwear: running shoes, casual shoes, hiking boots, sandals, formal shoes (all genders)\n"
+                    "Sunglasses: aviators, wayfarers, cat-eye, sports, and more\n"
+                    "Watches: analog, digital, smartwatches, chronographs\n"
+                    "Bags & Backpacks: hiking bags, laptop bags, totes, crossbody bags, duffel bags\n"
+                    "Hats & Caps: baseball caps, beanies, bucket hats, fedoras\n"
+                    "Socks & Underwear: all types\n"
+                    "Sportswear: running, gym, yoga, football kits"
+                ),
+                prompt_template=None,   # None = use global PromptVersion / PROMPT_TEMPLATE
+                is_active=1,
+            ))
+            db.commit()
+            print("Seeded default tenant config.")
+        else:
+            print("Default tenant config already exists — skipped.")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def seed_store_info() -> None:

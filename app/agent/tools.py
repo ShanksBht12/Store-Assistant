@@ -6,32 +6,36 @@ Each tool is a class with:
   - run(): the actual Python logic that executes when the LLM calls it
 
 Tools defined here:
-  search_products    — search the product catalog by keyword, category, or color
-  get_product        — fetch full details of one product by its database ID
-  get_price_history  — get the price change history for a specific product
-  check_stock        — check live stock quantity for a specific product
-  create_order       — create a customer order with one or more items
-  get_order_status   — look up order(s) by order ID or customer phone number
-  validate_phone     — validate a Nepali mobile phone number format
-  validate_address   — validate that a delivery address has enough detail
+  search_products      — search the product catalog by keyword, category, or color
+  get_product          — fetch full details of one product by its database ID
+  get_price_history    — get the price change history for a specific product
+  check_stock          — check live stock quantity for a specific product
+  create_order         — create a customer order with one or more items
+  get_order_status     — look up order(s) by order ID or customer phone number
+  validate_phone       — validate a phone number using tenant's regex rule
+  validate_address     — validate that a delivery address has enough detail
   update_order_payment — change the payment method on an existing pending order
-  get_best_sellers   — get the most-purchased products ranked by units sold
+  get_best_sellers     — get the most-purchased products ranked by units sold
+  get_store_info       — fetch live store facts from the database
+
+Phone validation and accepted payment methods are no longer hardcoded.
+They are resolved from the active TenantContext at tool-construction time,
+so every tenant (different country, different payment rails) gets the right
+rules without touching source code.
 """
 from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database.models import Order, OrderItem, OrderStatus, Product, ProductPriceHistory, StoreInfo
 
-PAYMENT_METHODS = {"esewa", "khalti", "cash on delivery", "cod"}
-
-# Nepali mobile numbers: start with 98, 97, or 96, exactly 10 digits total.
-_NEPALI_PHONE_RE = re.compile(r"^9[678]\d{8}$")
+if TYPE_CHECKING:
+    from app.config import TenantContext
 
 
 class Tool(ABC):
@@ -617,6 +621,14 @@ class GetProductTool(Tool):
 class CreateOrderTool(Tool):
     name = "create_order"
 
+    def __init__(self, tenant: "TenantContext"):
+        # Resolved from tenant config — no hardcoded Nepali/eSewa assumptions
+        self._payment_methods = {m.strip().lower() for m in tenant.payment_methods}
+        self._digital_payments = {m.strip().lower() for m in tenant.digital_payments}
+        self._phone_re = re.compile(tenant.phone_regex)
+        self._phone_hint = tenant.phone_hint
+        self._currency = tenant.currency
+
     @property
     def spec(self) -> dict[str, Any]:
         return {
@@ -673,12 +685,12 @@ class CreateOrderTool(Tool):
         if not items:
             return {"error": "items list cannot be empty."}
 
-        if payment_method.strip().lower() not in PAYMENT_METHODS:
-            return {"error": f"Unsupported payment method '{payment_method}'. Supported: eSewa, Khalti, Cash on Delivery."}
+        if payment_method.strip().lower() not in self._payment_methods:
+            return {"error": f"Unsupported payment method '{payment_method}'. Supported: {', '.join(sorted(self._payment_methods))}."}
 
         phone_digits = re.sub(r"[\s\-]", "", phone)
-        if not _NEPALI_PHONE_RE.match(phone_digits):
-            return {"error": f"'{phone}' is not a valid Nepali mobile number. Must be 10 digits starting with 98, 97, or 96."}
+        if not self._phone_re.match(phone_digits):
+            return {"error": f"'{phone}' is not a valid phone number. {self._phone_hint}"}
 
         # ── Validate every item before creating anything ──────────────────────
         resolved: list[dict] = []
@@ -861,6 +873,10 @@ def _order_to_dict(order: Order) -> dict[str, Any]:
 class ValidatePhoneTool(Tool):
     name = "validate_phone"
 
+    def __init__(self, tenant: "TenantContext"):
+        self._phone_re = re.compile(tenant.phone_regex)
+        self._phone_hint = tenant.phone_hint
+
     @property
     def spec(self) -> dict[str, Any]:
         return {
@@ -868,10 +884,10 @@ class ValidatePhoneTool(Tool):
             "function": {
                 "name": self.name,
                 "description": (
-                    "Validate a Nepali mobile phone number IMMEDIATELY after "
+                    "Validate a customer phone number IMMEDIATELY after "
                     "the customer provides it — before asking for address or "
-                    "payment method. Returns valid=true if it is a 10-digit "
-                    "number starting with 98, 97, or 96. If invalid, tell the "
+                    "payment method. Returns valid=true if the number matches "
+                    "the store's accepted format. If invalid, tell the "
                     "customer right away and ask them to re-enter it."
                 ),
                 "parameters": {
@@ -889,15 +905,12 @@ class ValidatePhoneTool(Tool):
 
     def run(self, db: Session, phone: str) -> dict[str, Any]:
         digits = re.sub(r"[\s\-]", "", phone)
-        if _NEPALI_PHONE_RE.match(digits):
+        if self._phone_re.match(digits):
             return {"valid": True, "phone": digits}
         return {
             "valid": False,
             "phone": phone,
-            "reason": (
-                f"'{phone}' is not a valid Nepali mobile number. "
-                "Must be 10 digits starting with 98, 97, or 96."
-            ),
+            "reason": self._phone_hint,
         }
 
 
@@ -982,6 +995,9 @@ class ValidateAddressTool(Tool):
 class UpdateOrderPaymentTool(Tool):
     name = "update_order_payment"
 
+    def __init__(self, tenant: "TenantContext"):
+        self._payment_methods = {m.strip().lower() for m in tenant.payment_methods}
+
     @property
     def spec(self) -> dict[str, Any]:
         return {
@@ -1026,11 +1042,11 @@ class UpdateOrderPaymentTool(Tool):
             }
 
         normalised = payment_method.strip().lower()
-        if normalised not in PAYMENT_METHODS:
+        if normalised not in self._payment_methods:
             return {
                 "error": (
                     f"Unsupported payment method '{payment_method}'. "
-                    "Supported: eSewa, Khalti, Cash on Delivery."
+                    f"Supported: {', '.join(sorted(self._payment_methods))}."
                 )
             }
 
@@ -1159,25 +1175,60 @@ class GetStoreInfoTool(Tool):
 
 
 # --- Registry ----------------------------------------------------------
-# One dict, built from the tool objects themselves -- TOOL_SPECS is derived
-# from TOOLS, not maintained as a second, independent list that could
-# silently drift out of sync with the actual tool classes.
+# build_tools() constructs fresh tool instances for the given tenant so
+# phone regex and payment methods come from TenantContext, not from
+# module-level constants. Call once per request in agent.py.
+#
+# The module-level TOOLS / TOOL_SPECS are kept for backward compatibility
+# with any code that imports them directly; they use the default tenant.
 
-TOOLS: dict[str, Tool] = {
-    tool.name: tool
-    for tool in (
+def build_tools(tenant: "TenantContext") -> tuple[dict[str, "Tool"], list[dict[str, Any]]]:
+    """
+    Build and return (tools_dict, tool_specs_list) for the given tenant.
+
+    Tenant-aware tools (phone validation, payment methods) are constructed
+    with the tenant's config so all region/business rules come from the DB,
+    not from hardcoded constants.
+
+    Usage in agent.py:
+        tenant = get_tenant_context()
+        tools, tool_specs = build_tools(tenant)
+    """
+    tool_instances = (
         SearchProductsTool(),
         GetProductTool(),
         GetPriceHistoryTool(),
         CheckStockTool(),
-        CreateOrderTool(),
+        CreateOrderTool(tenant),
         GetOrderStatusTool(),
-        ValidatePhoneTool(),
+        ValidatePhoneTool(tenant),
         ValidateAddressTool(),
-        UpdateOrderPaymentTool(),
+        UpdateOrderPaymentTool(tenant),
         GetBestSellersTool(),
         GetStoreInfoTool(),
     )
-}
+    tools = {t.name: t for t in tool_instances}
+    specs = [t.spec for t in tool_instances]
+    return tools, specs
 
-TOOL_SPECS: list[dict[str, Any]] = [tool.spec for tool in TOOLS.values()]
+
+# Backward-compat module-level singletons (default tenant)
+def _default_tools() -> tuple[dict[str, "Tool"], list[dict[str, Any]]]:
+    try:
+        from app.config import get_tenant_context
+        return build_tools(get_tenant_context("default"))
+    except Exception:
+        from app.config import TenantContext
+        fallback = TenantContext(
+            tenant_id="default", display_name="My Store",
+            phone_regex=r"^\+?\d{7,15}$",
+            phone_hint="Please enter a valid phone number.",
+            payment_methods=["card", "cash on delivery"],
+            digital_payments=[],
+            currency="USD", locale="en-US",
+            product_taxonomy="", prompt_template=None,
+        )
+        return build_tools(fallback)
+
+
+TOOLS, TOOL_SPECS = _default_tools()

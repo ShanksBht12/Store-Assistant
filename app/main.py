@@ -41,9 +41,10 @@ except Exception as _e:
 
 # ── Seed initial prompt version if table is empty ────────────────────────────
 from app.agent.prompt import PromptRegistry
-from app.database.seed import seed_store_info
+from app.database.seed import seed_store_info, seed_tenant_config
 PromptRegistry.seed_initial()
 seed_store_info()
+seed_tenant_config()
 
 settings = get_settings()
 

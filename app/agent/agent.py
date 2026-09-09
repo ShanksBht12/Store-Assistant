@@ -19,8 +19,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.agent.prompt import SYSTEM_PROMPT, PromptRegistry
-from app.agent.tools import TOOLS, TOOL_SPECS
+from app.agent.prompt import PROMPT_TEMPLATE, PromptRegistry
+from app.agent.tools import build_tools
+from app.config import get_tenant_context
 from app.database.models import ConversationState, Product
 from app.providers.llm import get_llm_provider
 
@@ -41,7 +42,6 @@ def _load_messages(state: ConversationState) -> list[dict[str, Any]]:
         return msgs
     active_prompt = PromptRegistry.get_active_prompt()
     return [{"role": "system", "content": active_prompt}]
-
 
 def _save_messages(db: Session, state: ConversationState, messages: list[dict[str, Any]]) -> None:
     system = messages[:1]
@@ -140,16 +140,19 @@ def _sanitise_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 
-_DIGITAL_PAYMENT_METHODS = {"esewa", "khalti"}
+_DIGITAL_PAYMENT_METHODS = {"esewa", "khalti"}  # kept as fallback default
 
 
 def _extract_product_and_payment(
     db: Session,
     tool_calls_made: list[dict[str, Any]],
+    digital_payments: set[str] | None = None,
 ) -> tuple[Product | None, str | None]:
     """Return (last_product, payment_method_or_None) based on THIS turn's tool calls only.
     History-based persistence is handled via ConversationState.last_product_id in _finalise.
     """
+    # Use tenant digital_payments if provided, else fall back to default set
+    _digital = digital_payments if digital_payments is not None else _DIGITAL_PAYMENT_METHODS
     product: Product | None = None
     payment_method: str | None = None
 
@@ -220,14 +223,14 @@ def _extract_product_and_payment(
             if "order_id" in result:
                 raw_pm = result.get("payment_method", "")
                 normalised = raw_pm.strip().lower()
-                if normalised in _DIGITAL_PAYMENT_METHODS:
+                if normalised in _digital:
                     payment_method = normalised
                 product = None  # no product card after order confirmation
         elif name == "update_order_payment":
             if "order_id" in result:
                 raw_pm = result.get("payment_method", "")
                 normalised = raw_pm.strip().lower()
-                if normalised in _DIGITAL_PAYMENT_METHODS:
+                if normalised in _digital:
                     payment_method = normalised
                 else:
                     payment_method = None
@@ -247,14 +250,19 @@ async def handle_chat_message(
 
     Returns (reply_text, product_or_None, payment_method_or_None).
     - product: last product the agent touched — frontend renders a product card.
-    - payment_method: 'esewa' or 'khalti' when an order was just placed with
-      a digital payment method — frontend renders the matching QR code.
+    - payment_method: a digital payment method name when an order was just placed
+      with digital payment — frontend renders the matching QR code.
     """
+    # Resolve tenant config for this request — drives phone validation,
+    # payment methods, prompt rendering, and currency.
+    tenant = get_tenant_context("default")
+    TOOLS, TOOL_SPECS = build_tools(tenant)
+
     state = db.get(ConversationState, conversation_id)
     if state is None:
         state = ConversationState(
             id=conversation_id,
-            messages=[{"role": "system", "content": PromptRegistry.get_active_prompt()}],
+            messages=[{"role": "system", "content": PromptRegistry.get_active_prompt_for_tenant(tenant)}],
         )
         db.add(state)
         db.commit()
@@ -271,7 +279,10 @@ async def handle_chat_message(
     def _finalise(content: str, msgs: list) -> tuple[str, Any, Any]:
         """Save messages, resolve product+payment, update last_product_id, return tuple."""
         _save_messages(db, state, msgs)
-        product, payment_method = _extract_product_and_payment(db, tool_calls_made)
+        product, payment_method = _extract_product_and_payment(
+            db, tool_calls_made,
+            digital_payments=set(tenant.digital_payments),
+        )
 
         # ── Card display rule ─────────────────────────────────────────────────
         # Show the product card ONLY when a tool call happened this turn that
@@ -397,7 +408,7 @@ async def handle_chat_message(
                         sz   = f" size {size}" if size else ""
                         item_lines.append(f"{name}{sz} x{qty} = {lt:,.0f} {currency}")
 
-                    if pm_lower in ("esewa", "khalti"):
+                    if pm_lower in set(tenant.digital_payments):
                         payment_note = f"The {pm} QR code is displayed in the chat — scan it to complete your payment."
                         final_payment_method = pm_lower
                     else:
@@ -420,7 +431,7 @@ async def handle_chat_message(
                     order_id = res["order_id"]
                     total = res.get("total_price", 0)
                     currency = res.get("currency", "NPR")
-                    if pm_lower in ("esewa", "khalti"):
+                    if pm_lower in set(tenant.digital_payments):
                         payment_note = f"The {pm} QR code is now displayed in the chat — scan it to complete your payment."
                         final_payment_method = pm_lower
                     else:

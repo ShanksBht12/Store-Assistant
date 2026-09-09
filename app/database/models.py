@@ -7,6 +7,8 @@ Tables defined here:
   conversation_states    — persisted chat history per session so the agent remembers past messages
   orders                 — one row per customer order (customer info, payment, status, grand total)
   order_items            — one row per product line inside an order (name, qty, unit price, line total)
+  tenant_configs         — per-tenant config: phone regex, payment methods, currency, prompt template
+  store_info             — single-row mutable store facts (name, location, contact, hours, policies)
   prompt_versions        — versioned history of the LLM system prompt; one row is marked active
   OrderStatus            — enum: pending_payment / paid / cancelled
 """
@@ -130,6 +132,57 @@ class OrderItem(Base):
     product = relationship("Product")
 
 
+class TenantConfig(Base):
+    """
+    Per-tenant configuration: one row per tenant (default tenant id='default').
+
+    Holds all the business-specific, region-specific settings that vary between
+    deployments — phone validation rules, accepted payment methods, product
+    taxonomy description, currency, locale, and the base prompt template.
+
+    The agent resolves the active tenant at request time via get_tenant_context()
+    in config.py and passes it into tools and the prompt renderer, so nothing
+    business-specific is compiled into source code.
+
+    Columns:
+      tenant_id        — unique string key, e.g. 'default', 'style-store', 'acme-retail'
+      display_name     — human-readable tenant name, e.g. 'Style Store'
+      phone_regex      — Python regex for valid customer phone numbers, e.g. '^9[678]\\d{8}$'
+      phone_hint       — human-readable hint shown when phone is invalid
+      payment_methods  — JSON list of accepted payment method strings (lowercase),
+                         e.g. ["esewa", "khalti", "cash on delivery", "cod"]
+      digital_payments — JSON list of payment methods that trigger a QR code,
+                         e.g. ["esewa", "khalti"]
+      currency         — ISO currency code, e.g. 'NPR', 'USD', 'EUR'
+      locale           — BCP-47 locale string, e.g. 'ne-NP', 'en-US'
+      product_taxonomy — free-text description of product categories for the prompt
+      prompt_template  — Jinja2-style prompt template; use {{ variable }} slots for
+                         tenant-specific values. If empty, the global PromptVersion
+                         active text is used as-is.
+      is_active        — 1 = this tenant is currently active, 0 = disabled
+      created_at       — when this row was created
+      updated_at       — last update timestamp
+    """
+    __tablename__ = "tenant_configs"
+
+    tenant_id        = Column(String, primary_key=True, index=True)
+    display_name     = Column(String, nullable=False, default="My Store")
+    phone_regex      = Column(String, nullable=False, default=r"^\+?\d{7,15}$")
+    phone_hint       = Column(String, nullable=False,
+                              default="Please enter a valid phone number.")
+    payment_methods  = Column(JSON, nullable=False,
+                              default=lambda: ["card", "cash on delivery"])
+    digital_payments = Column(JSON, nullable=False,
+                              default=lambda: [])
+    currency         = Column(String, nullable=False, default="USD")
+    locale           = Column(String, nullable=False, default="en-US")
+    product_taxonomy = Column(String, nullable=True)
+    prompt_template  = Column(String, nullable=True)
+    is_active        = Column(Integer, nullable=False, default=1)
+    created_at       = Column(DateTime, default=_utcnow)
+    updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class StoreInfo(Base):
     """
     Single-row table holding all mutable store facts (name, location, contact,
@@ -158,30 +211,32 @@ class StoreInfo(Base):
 
 class PromptVersion(Base):
     """
-    Versioned history of the LLM system prompt.
+    Versioned history of the LLM system prompt, scoped per tenant.
 
-    Each row stores a complete snapshot of the system prompt text with
-    metadata. Exactly one row has is_active=True — that is the prompt the
-    agent loads at runtime. Changing the active prompt requires setting
-    is_active=False on the current active row and is_active=True on the
-    new one (handled atomically by the registry and admin API).
+    Each row stores a complete snapshot of the system prompt text for a
+    specific tenant. Exactly one row per tenant has is_active=1 — that is
+    the prompt the agent loads at runtime for that tenant. This means multiple
+    business personas can run from the same deployment simultaneously, each
+    with its own independent prompt version history.
 
     Columns:
-      version       — auto-incrementing integer label (1, 2, 3, …)
+      tenant_id     — which tenant this version belongs to (FK → tenant_configs)
+      version       — auto-incrementing integer label per tenant (1, 2, 3, …)
       label         — short human-readable name, e.g. "v1-initial", "v2-dspy-optimized"
-      prompt_text   — full system prompt string
-      notes         — free-text change notes, e.g. "Added sizing guidance"
-      is_active     — True for the currently deployed prompt (only one at a time)
-      created_by    — who created this version (e.g. "admin", "dspy-bootstrap")
+      prompt_text   — full system prompt string (may contain {{ slots }})
+      notes         — free-text change notes
+      is_active     — 1 = currently active for this tenant (one active per tenant)
+      created_by    — who/what created it ("admin", "dspy-bootstrap", etc.)
       created_at    — when it was created
     """
     __tablename__ = "prompt_versions"
 
-    id         = Column(Integer, primary_key=True, index=True)
-    version    = Column(Integer, nullable=False, index=True)
-    label      = Column(String, nullable=False)
+    id          = Column(Integer, primary_key=True, index=True)
+    tenant_id   = Column(String, nullable=False, index=True, default="default")
+    version     = Column(Integer, nullable=False, index=True)
+    label       = Column(String, nullable=False)
     prompt_text = Column(String, nullable=False)
-    notes      = Column(String, nullable=True)
-    is_active  = Column(Integer, default=0, nullable=False)  # 1 = active, 0 = inactive
-    created_by = Column(String, nullable=True, default="admin")
-    created_at = Column(DateTime, default=_utcnow)
+    notes       = Column(String, nullable=True)
+    is_active   = Column(Integer, default=0, nullable=False)  # 1 = active for this tenant
+    created_by  = Column(String, nullable=True, default="admin")
+    created_at  = Column(DateTime, default=_utcnow)
