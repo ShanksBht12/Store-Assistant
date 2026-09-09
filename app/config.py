@@ -86,16 +86,18 @@ def get_settings() -> Settings:
 
 @dataclass
 class TenantContext:
-    tenant_id:        str
-    display_name:     str
-    phone_regex:      str               # compiled at use time via re.compile()
-    phone_hint:       str               # shown to user when phone is invalid
-    payment_methods:  List[str]         # all accepted methods (lowercase)
-    digital_payments: List[str]         # subset that trigger QR codes
-    currency:         str
-    locale:           str
-    product_taxonomy: str               # injected into the prompt template
-    prompt_template:  str | None        # Jinja2-style; None → use global PromptVersion
+    tenant_id:           str
+    display_name:        str
+    phone_regex:         str
+    phone_hint:          str
+    payment_methods:     List[str]
+    digital_payments:    List[str]
+    currency:            str
+    locale:              str
+    product_taxonomy:    str
+    prompt_template:     str | None
+    requests_per_minute: int = 20    # 0 = unlimited
+    requests_per_day:    int = 1000  # 0 = unlimited
 
 
 def get_tenant_context(tenant_id: str = "default") -> "TenantContext":
@@ -116,16 +118,18 @@ def get_tenant_context(tenant_id: str = "default") -> "TenantContext":
             row = db.get(TenantConfig, tenant_id)
             if row and row.is_active:
                 return TenantContext(
-                    tenant_id        = row.tenant_id,
-                    display_name     = row.display_name,
-                    phone_regex      = row.phone_regex,
-                    phone_hint       = row.phone_hint,
-                    payment_methods  = list(row.payment_methods or []),
-                    digital_payments = list(row.digital_payments or []),
-                    currency         = row.currency,
-                    locale           = row.locale,
-                    product_taxonomy = row.product_taxonomy or "",
-                    prompt_template  = row.prompt_template,
+                    tenant_id            = row.tenant_id,
+                    display_name         = row.display_name,
+                    phone_regex          = row.phone_regex,
+                    phone_hint           = row.phone_hint,
+                    payment_methods      = list(row.payment_methods or []),
+                    digital_payments     = list(row.digital_payments or []),
+                    currency             = row.currency,
+                    locale               = row.locale,
+                    product_taxonomy     = row.product_taxonomy or "",
+                    prompt_template      = row.prompt_template,
+                    requests_per_minute  = row.requests_per_minute,
+                    requests_per_day     = row.requests_per_day,
                 )
         finally:
             db.close()
@@ -134,14 +138,16 @@ def get_tenant_context(tenant_id: str = "default") -> "TenantContext":
 
     # ── Built-in fallback (generic, no region assumptions) ────────────────────
     return TenantContext(
-        tenant_id        = "default",
-        display_name     = "My Store",
-        phone_regex      = r"^\+?\d{7,15}$",
-        phone_hint       = "Please enter a valid phone number (7–15 digits).",
-        payment_methods  = ["card", "cash on delivery"],
-        digital_payments = [],
-        currency         = "USD",
-        locale           = "en-US",
-        product_taxonomy = "",
-        prompt_template  = None,
+        tenant_id            = "default",
+        display_name         = "My Store",
+        phone_regex          = r"^\+?\d{7,15}$",
+        phone_hint           = "Please enter a valid phone number (7–15 digits).",
+        payment_methods      = ["card", "cash on delivery"],
+        digital_payments     = [],
+        currency             = "USD",
+        locale               = "en-US",
+        product_taxonomy     = "",
+        prompt_template      = None,
+        requests_per_minute  = 20,
+        requests_per_day     = 1000,
     )

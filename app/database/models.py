@@ -178,6 +178,11 @@ class TenantConfig(Base):
     locale           = Column(String, nullable=False, default="en-US")
     product_taxonomy = Column(String, nullable=True)
     prompt_template  = Column(String, nullable=True)
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    # Max chat requests allowed per tenant within a sliding window.
+    # 0 = unlimited (use for internal/trusted tenants).
+    requests_per_minute = Column(Integer, nullable=False, default=20)
+    requests_per_day    = Column(Integer, nullable=False, default=1000)
     is_active        = Column(Integer, nullable=False, default=1)
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
