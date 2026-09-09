@@ -35,11 +35,11 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
     conversation_id = request.conversation_id or str(uuid.uuid4())
 
     try:
-        reply, product, payment_method = await route_chat(
+        reply, card_data, payment_method = await route_chat(
             db=db,
             conversation_id=conversation_id,
             message=request.message,
-            model_override=request.model,   # optional per-request model override
+            model_override=request.model,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -47,6 +47,6 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
     return ChatResponse(
         conversation_id=conversation_id,
         reply=reply,
-        product=product,
+        product=card_data,        # generic card dict; field named 'product' for frontend compat
         payment_method=payment_method,
     )

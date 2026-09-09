@@ -3,17 +3,23 @@ schemas/chat.py — Pydantic models for the chat API request and response.
 
   ChatRequest   — what the frontend sends: message text + optional conversation_id
                   + optional model override for per-request model selection
-  ChatResponse  — what the API returns: reply text, optional product card,
+  ChatResponse  — what the API returns: reply text, optional rich card data,
                   optional payment QR method, conversation_id
+
+NOTE: `card_data` replaces the old `product` field. It is a generic dict so
+the schema is not coupled to the retail domain — a marketing agency adapter
+can return campaign data, a booking adapter can return booking summaries, etc.
+The frontend maps the dict to the appropriate UI component based on its shape.
+For backward compatibility, the field is still serialised as `product` in the
+JSON response so existing frontend code continues to work unchanged.
 """
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.schemas.product import ProductOut
-
 
 class ChatRequest(BaseModel):
-    message:         str       = Field(..., min_length=1, max_length=4000)
+    message:         str        = Field(..., min_length=1, max_length=4000)
     conversation_id: str | None = None
     model:           str | None = Field(
         default=None,
@@ -29,13 +35,16 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     conversation_id: str
     reply:           str
-    product:         ProductOut | None = Field(
+    # Generic card data — serialised as "product" for frontend backward compat.
+    # Shape is determined by the active ToolRegistry adapter (retail → product
+    # dict; agency → campaign dict; etc.).
+    product:         dict[str, Any] | None = Field(
         default=None,
-        description="The product the agent last interacted with, if any — "
-        "the frontend renders this as a product card.",
+        description="Rich card data for the frontend to render. Shape depends on "
+        "the active business-type adapter (retail: product dict; agency: campaign dict).",
     )
     payment_method:  str | None = Field(
         default=None,
-        description="Set to 'esewa' or 'khalti' after a successful create_order "
-        "call — tells the frontend to render the matching payment QR code.",
+        description="Lowercase payment method string when a digital payment was "
+        "confirmed this turn — tells the frontend to render the matching QR code.",
     )
