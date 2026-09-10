@@ -103,6 +103,8 @@ class TenantContext:
     llm_api_key:         str | None = None
     llm_api_base:        str | None = None
     llm_model:           str | None = None
+    # Which ToolRegistry adapter to use — resolved by registry_factory.build_registry()
+    registry_type:       str = "retail"
 
 
 def _BUILTIN_DEFAULT() -> "TenantContext":
@@ -124,6 +126,7 @@ def _BUILTIN_DEFAULT() -> "TenantContext":
         llm_api_key          = None,
         llm_api_base         = None,
         llm_model            = None,
+        registry_type        = "retail",
     )
 
 
@@ -146,6 +149,7 @@ def _row_to_context(row: Any) -> "TenantContext":
         llm_api_key          = row.llm_api_key,
         llm_api_base         = row.llm_api_base,
         llm_model            = row.llm_model,
+        registry_type        = row.registry_type or "retail",
     )
 
 

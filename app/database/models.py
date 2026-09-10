@@ -192,6 +192,11 @@ class TenantConfig(Base):
     llm_api_key  = Column(String, nullable=True)   # provider API key for this tenant
     llm_api_base = Column(String, nullable=True)   # endpoint base URL override
     llm_model    = Column(String, nullable=True)   # model name override
+    # ── Tool registry ─────────────────────────────────────────────────────────
+    # Selects which ToolRegistry adapter to use for this tenant.
+    # 'retail'  → RetailToolRegistry  (products, orders, stock, store info)
+    # Add new business types by registering them in registry_factory.py.
+    registry_type = Column(String, nullable=False, default="retail")
     is_active        = Column(Integer, nullable=False, default=1)
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)

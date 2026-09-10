@@ -375,6 +375,7 @@ def seed_tenant_config() -> None:
                     "Sportswear: running, gym, yoga, football kits"
                 ),
                 prompt_template=None,   # None = use global PromptVersion / PROMPT_TEMPLATE
+                registry_type="retail",
                 is_active=1,
             ))
             db.commit()
