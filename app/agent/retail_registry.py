@@ -1,21 +1,20 @@
 """
 retail_registry.py — Retail-store adapter implementing ToolRegistry.
 
-This is the ONLY file that knows about:
-  - Product / Order ORM models
-  - search_products, create_order, check_stock, get_product, etc.
+This is the ONLY file in the agent layer that knows about:
+  - The retail tool set (search_products, create_order, check_stock, etc.)
   - Product card display logic (which tool results trigger a card)
   - Order confirmation formatting
   - eSewa/Khalti QR triggering
 
+ORM models are NOT imported here directly. All DB access goes through
+the repository layer (app/database/repositories.py) — this file calls
+ProductRepository.get_by_id() instead of db.get(Product, id), keeping
+business logic decoupled from the data layer.
+
 agent.py imports nothing from here directly — it receives a RetailToolRegistry
 instance injected by router.py and talks to it only through the ToolRegistry
 Protocol defined in registry.py.
-
-To add a new business type (marketing agency, booking platform, …):
-  1. Create a new *_registry.py that implements ToolRegistry.
-  2. Instantiate it in router.py based on tenant config.
-  3. agent.py, prompt.py, and the LLM provider layer stay unchanged.
 """
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy.orm import Session
 
 from app.agent.tools import build_tools
-from app.database.models import Order, OrderItem, Product
+from app.database.repositories import ProductRepository
 
 if TYPE_CHECKING:
     from app.config import TenantContext
@@ -84,8 +83,10 @@ class RetailToolRegistry:
         card_data is the full product dict the frontend renders as a card.
         """
         digital = {m.lower() for m in self._tenant.digital_payments}
-        product: Product | None = None
+        product = None   # will be a plain dict (card_data) or None
         payment_method: str | None = None
+
+        product_repo = ProductRepository(db)
 
         for call in tool_calls_made:
             name      = call["name"]
@@ -100,18 +101,16 @@ class RetailToolRegistry:
                 query_arg = arguments.get("query") or ""
                 color_arg = arguments.get("color") or ""
 
-                # LLM sometimes bakes color into query string instead of
-                # using the separate color param — detect and normalise.
                 if not color_arg and first.get("color") and query_arg:
                     if first["color"].lower() in query_arg.lower():
                         color_arg = first["color"]
 
                 if len(products_data) == 1:
-                    p = db.get(Product, first["id"])
+                    p = product_repo.get_by_id(first["id"])
                     if p:
                         product = p
                 elif color_arg and _is_specific_hit(query_arg, first.get("name", "")):
-                    p = db.get(Product, first["id"])
+                    p = product_repo.get_by_id(first["id"])
                     if p:
                         product = p
                 elif (
@@ -119,27 +118,27 @@ class RetailToolRegistry:
                     and len(products_data) <= 3
                     and _is_specific_hit(query_arg, first.get("name", ""))
                 ):
-                    p = db.get(Product, first["id"])
+                    p = product_repo.get_by_id(first["id"])
                     if p:
                         product = p
 
             elif name == "get_product":
                 pid = result.get("product_id")
                 if pid:
-                    p = db.get(Product, pid)
+                    p = product_repo.get_by_id(pid)
                     if p:
                         product = p
 
             elif name in ("check_stock", "get_price_history"):
                 pid = result.get("product_id")
                 if pid:
-                    p = db.get(Product, pid)
+                    p = product_repo.get_by_id(pid)
                     if p:
                         product = p
 
             elif name in ("create_order", "update_order_payment"):
                 if "order_id" in result:
-                    raw_pm    = result.get("payment_method", "")
+                    raw_pm     = result.get("payment_method", "")
                     normalised = raw_pm.strip().lower()
                     payment_method = normalised if normalised in digital else None
                 product = None  # never show a product card on order/payment turns
@@ -241,7 +240,7 @@ def _is_specific_hit(query: str, product_name: str) -> bool:
     return matches / len(q_words) >= 0.6
 
 
-def _product_to_dict(product: Product) -> dict[str, Any]:
+def _product_to_dict(product) -> dict[str, Any]:
     """Serialise a Product ORM row to the card dict the frontend expects."""
     return {
         "id":             product.id,

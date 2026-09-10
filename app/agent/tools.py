@@ -29,10 +29,13 @@ import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.database.models import Order, OrderItem, OrderStatus, Product, ProductPriceHistory, StoreInfo
+from app.database.repositories import (
+    OrderRepository,
+    ProductRepository,
+    StoreInfoRepository,
+)
 
 if TYPE_CHECKING:
     from app.config import TenantContext
@@ -325,33 +328,20 @@ class SearchProductsTool(Tool):
         category: str | None = None,
         max_results: int = 20,
     ) -> dict[str, Any]:
-        from sqlalchemy import case
+        repo = ProductRepository(db)
 
         # ── Step 0: exact/near-exact name short-circuit ───────────────────────
-        # Prevents category-synonym stripping below (e.g. "...Running Shoes"
-        # getting its "Shoes" suffix stripped into category="Running") from
-        # hijacking a search for a specific, already-known product name — the
-        # case where the customer types back the exact name the bot just gave
-        # them. Without this, an exact name could still get filtered into the
-        # wrong category (or an over-narrowed remaining_query) and return the
-        # wrong product or nothing at all.
         if query:
-            exact = db.query(Product).filter(Product.name.ilike(query.strip())).first()
+            exact = repo.get_by_name_exact(query.strip())
             if exact and (not color or (exact.color or "").lower() == color.lower()):
                 return {
                     "count": 1,
                     "products": [{
-                        "id": exact.id,
-                        "sku": exact.sku,
-                        "name": exact.name,
-                        "brand": exact.brand,
-                        "color": exact.color,
-                        "category": exact.category,
-                        "description": exact.description,
-                        "image_url": exact.image_url,
-                        "price": exact.current_price,
-                        "currency": exact.currency,
-                        "stock_quantity": exact.stock_quantity,
+                        "id": exact.id, "sku": exact.sku, "name": exact.name,
+                        "brand": exact.brand, "color": exact.color,
+                        "category": exact.category, "description": exact.description,
+                        "image_url": exact.image_url, "price": exact.current_price,
+                        "currency": exact.currency, "stock_quantity": exact.stock_quantity,
                     }],
                 }
 
@@ -365,17 +355,12 @@ class SearchProductsTool(Tool):
             if cat_from_query:
                 if not category:
                     resolved_category = cat_from_query
-                remaining_query = leftover  # None if whole query was category phrase
+                remaining_query = leftover
                 if matched_key:
                     narrow_word = self._NARROWING_TERMS.get(matched_key.lower())
 
         # ── Step 1b: extract color baked into query string ───────────────────
-        # LLMs often call search_products(query="Nike Air Max Red") instead of
-        # using the separate color param. Detect trailing color words and split.
         resolved_color: str | None = color
-
-        # Also strip noise words that sometimes remain after category resolution
-        # e.g. "womens section" -> remaining="section" -> useless token
         _noise_words = {
             "section", "area", "stuff", "things", "items", "products",
             "category", "collection", "range", "options", "available",
@@ -391,7 +376,6 @@ class SearchProductsTool(Tool):
                 "multicolor", "coral", "mint", "lavender", "mustard",
             }
             words = remaining_query.split()
-            # Check last 2 words then last 1 word for a known color
             for n in (2, 1):
                 if len(words) >= n:
                     candidate = " ".join(words[-n:]).lower()
@@ -400,86 +384,22 @@ class SearchProductsTool(Tool):
                         remaining_query = " ".join(words[:-n]).strip() or None
                         break
 
-        # ── Step 2: build base DB query ──────────────────────────────────────
-        q = db.query(Product)
-
-        if remaining_query:
-            stop_words = {"and", "or", "&", "the", "a", "an", "for", "in", "with", "of"}
-            tokens = [
-                t.strip(".,;:")
-                for t in remaining_query.split()
-                if t.strip(".,;:").lower() not in stop_words and t.strip(".,;:")
-            ]
-            if tokens:
-                token_filters = []
-                for token in tokens:
-                    like = f"%{token}%"
-                    token_filters.append(Product.name.ilike(like))
-                    token_filters.append(Product.brand.ilike(like))
-                    # Only match category and description if token is ≥4 chars
-                    # to avoid noise from short tokens like "co", "go" etc.
-                    if len(token) >= 4:
-                        token_filters.append(Product.category.ilike(like))
-                        token_filters.append(Product.description.ilike(like))
-                q = q.filter(or_(*token_filters))
-
-                # Rank exact full-name / brand matches first
-                full_like = f"%{remaining_query}%"
-                q = q.order_by(
-                    case(
-                        (Product.name.ilike(full_like), 0),
-                        (Product.brand.ilike(full_like), 1),
-                        else_=2,
-                    ),
-                    Product.id,
-                )
-            else:
-                q = q.order_by(Product.id)
-        else:
-            q = q.order_by(Product.id)
-
-        # ── Step 3: apply filters ─────────────────────────────────────────────
-        if resolved_color:
-            q = q.filter(Product.color.ilike(f"%{resolved_color}%"))
-        if resolved_category:
-            # Use exact match when the resolved category is a full known category name,
-            # otherwise fall back to substring ILIKE (for partial like "Kids", "Bags").
-            # This avoids "Men's Tops" matching inside "Women's Tops" via ILIKE.
-            exact_categories = {
-                "Men's Tops", "Men's Bottoms", "Men's Outerwear",
-                "Women's Tops", "Women's Bottoms", "Women's Dresses", "Women's Outerwear",
-                "Kids Boys", "Kids Girls",
-                "Bags & Backpacks", "Hats & Caps", "Socks & Underwear",
-                "Sunglasses", "Watches", "Sportswear",
-                "Running", "Casual", "Training", "Basketball", "Trail",
-                "Hiking", "Formal", "Sandal",
-            }
-            if resolved_category in exact_categories:
-                q = q.filter(Product.category == resolved_category)
-            else:
-                q = q.filter(Product.category.ilike(f"%{resolved_category}%"))
-        if narrow_word:
-            # e.g. "blue jeans" resolved to category=Bottoms, color=Blue —
-            # without this, "jeans" itself would be lost and any blue item
-            # in Bottoms (shorts, trousers, etc.) could match.
-            narrow_like = f"%{narrow_word}%"
-            q = q.filter(or_(Product.name.ilike(narrow_like), Product.description.ilike(narrow_like)))
-
-        products = q.limit(max_results).all()
+        # ── Step 2+3: delegate all DB logic to repository ────────────────────
+        products = repo.search(
+            remaining_query   = remaining_query,
+            resolved_color    = resolved_color,
+            resolved_category = resolved_category,
+            narrow_word       = narrow_word,
+            max_results       = max_results,
+        )
         return {
             "count": len(products),
             "products": [
                 {
-                    "id": p.id,
-                    "sku": p.sku,
-                    "name": p.name,
-                    "brand": p.brand,
-                    "color": p.color,
-                    "category": p.category,
-                    "description": p.description,
-                    "image_url": p.image_url,
-                    "price": p.current_price,
-                    "currency": p.currency,
+                    "id": p.id, "sku": p.sku, "name": p.name, "brand": p.brand,
+                    "color": p.color, "category": p.category,
+                    "description": p.description, "image_url": p.image_url,
+                    "price": p.current_price, "currency": p.currency,
                     "stock_quantity": p.stock_quantity,
                 }
                 for p in products
@@ -508,16 +428,11 @@ class GetPriceHistoryTool(Tool):
         }
 
     def run(self, db: Session, product_id: int) -> dict[str, Any]:
-        product = db.get(Product, product_id)
+        repo = ProductRepository(db)
+        product = repo.get_by_id(product_id)
         if product is None:
             return {"error": f"No product found with id {product_id}"}
-
-        history = (
-            db.query(ProductPriceHistory)
-            .filter(ProductPriceHistory.product_id == product_id)
-            .order_by(ProductPriceHistory.valid_from)
-            .all()
-        )
+        history = repo.get_price_history(product_id)
         return {
             "product_id": product_id,
             "product_name": product.name,
@@ -555,7 +470,7 @@ class CheckStockTool(Tool):
         }
 
     def run(self, db: Session, product_id: int) -> dict[str, Any]:
-        product = db.get(Product, product_id)
+        product = ProductRepository(db).get_by_id(product_id)
         if product is None:
             return {"error": f"No product found with id {product_id}"}
         return {
@@ -599,21 +514,15 @@ class GetProductTool(Tool):
         }
 
     def run(self, db: Session, product_id: int) -> dict[str, Any]:
-        product = db.get(Product, product_id)
+        product = ProductRepository(db).get_by_id(product_id)
         if product is None:
             return {"error": f"No product found with id {product_id}"}
         return {
-            "product_id": product.id,
-            "sku": product.sku,
-            "name": product.name,
-            "brand": product.brand,
-            "description": product.description,
-            "category": product.category,
-            "color": product.color,
-            "image_url": product.image_url,
-            "current_price": product.current_price,
-            "currency": product.currency,
-            "stock_quantity": product.stock_quantity,
+            "product_id": product.id, "sku": product.sku, "name": product.name,
+            "brand": product.brand, "description": product.description,
+            "category": product.category, "color": product.color,
+            "image_url": product.image_url, "current_price": product.current_price,
+            "currency": product.currency, "stock_quantity": product.stock_quantity,
             "in_stock": product.stock_quantity > 0,
         }
 
@@ -681,96 +590,69 @@ class CreateOrderTool(Tool):
         payment_method: str,
         conversation_id: str | None = None,
     ) -> dict[str, Any]:
-        # ── Basic validation ──────────────────────────────────────────────────
         if not items:
             return {"error": "items list cannot be empty."}
-
         if payment_method.strip().lower() not in self._payment_methods:
             return {"error": f"Unsupported payment method '{payment_method}'. Supported: {', '.join(sorted(self._payment_methods))}."}
-
         phone_digits = re.sub(r"[\s\-]", "", phone)
         if not self._phone_re.match(phone_digits):
             return {"error": f"'{phone}' is not a valid phone number. {self._phone_hint}"}
 
-        # ── Validate every item before creating anything ──────────────────────
+        product_repo = ProductRepository(db)
+        order_repo   = OrderRepository(db)
+
+        # Validate every item via repository before creating anything
         resolved: list[dict] = []
         for item in items:
             pid = item.get("product_id")
             qty = max(1, int(item.get("quantity") or 1))
-            size  = item.get("size")
-            color = item.get("color")
-
-            product = db.get(Product, pid)
+            product = product_repo.get_by_id(pid)
             if product is None:
                 return {"error": f"No product found with id {pid}."}
             if product.stock_quantity < qty:
                 return {"error": f"Only {product.stock_quantity} left in stock for '{product.name}', cannot order {qty}."}
-
             resolved.append({
-                "product": product,
-                "qty": qty,
-                "size": size,
-                "color": color or product.color,
+                "product":    product,
+                "qty":        qty,
+                "size":       item.get("size"),
+                "color":      item.get("color") or product.color,
                 "unit_price": product.current_price,
                 "line_total": product.current_price * qty,
-                "currency": product.currency,
+                "currency":   product.currency,
             })
 
         grand_total = sum(r["line_total"] for r in resolved)
-        currency = resolved[0]["currency"]
+        currency    = resolved[0]["currency"]
 
-        # ── Create one Order row ──────────────────────────────────────────────
-        order = Order(
-            conversation_id=conversation_id,
-            grand_total=grand_total,
-            currency=currency,
-            customer_name=customer_name,
-            phone=phone_digits,
-            address=address,
-            payment_method=payment_method,
-            status=OrderStatus.PENDING_PAYMENT,
+        order = order_repo.create(
+            conversation_id = conversation_id,
+            grand_total     = grand_total,
+            currency        = currency,
+            customer_name   = customer_name,
+            phone           = phone_digits,
+            address         = address,
+            payment_method  = payment_method,
+            items           = resolved,
         )
-        db.add(order)
-        db.flush()  # get order.id before inserting items
-
-        # ── Create OrderItem rows + decrement stock ───────────────────────────
-        item_summaries: list[dict] = []
-        for r in resolved:
-            product = r["product"]
-            oi = OrderItem(
-                order_id=order.id,
-                product_id=product.id,
-                product_name_snapshot=product.name,
-                color=r["color"],
-                size=r["size"],
-                quantity=r["qty"],
-                unit_price=r["unit_price"],
-                line_total=r["line_total"],
-                currency=r["currency"],
-            )
-            db.add(oi)
-            product.stock_quantity -= r["qty"]
-            db.add(product)
-            item_summaries.append({
-                "product_name": product.name,
-                "color": r["color"],
-                "size": r["size"],
-                "quantity": r["qty"],
-                "unit_price": r["unit_price"],
-                "line_total": r["line_total"],
-            })
-
-        db.commit()
-        db.refresh(order)
 
         return {
-            "order_id": order.id,
-            "items": item_summaries,
-            "item_count": len(item_summaries),
-            "grand_total": grand_total,
-            "currency": currency,
+            "order_id":       order.id,
+            "items": [
+                {
+                    "product_name": r["product"].name,
+                    "color":        r["color"],
+                    "size":         r["size"],
+                    "quantity":     r["qty"],
+                    "unit_price":   r["unit_price"],
+                    "line_total":   r["line_total"],
+                }
+                for r in resolved
+            ],
+            "item_count":     len(resolved),
+            "grand_total":    grand_total,
+            "currency":       currency,
             "payment_method": payment_method,
-            "status": order.status.value,
+            "status":         order.status.value,
         }
 
 
@@ -814,38 +696,29 @@ class GetOrderStatusTool(Tool):
         if not order_id and not phone:
             return {"error": "Please provide either an order ID or a phone number to look up an order."}
 
+        repo = OrderRepository(db)
+
         if order_id:
-            order = db.get(Order, order_id)
+            order = repo.get_by_id(order_id)
             if order is None:
                 return {"error": f"No order found with id {order_id}."}
             return {"orders": [_order_to_dict(order)]}
 
-        # Validate phone before querying — reject non-numeric or too-short values
         phone_digits = re.sub(r"[\s\-]", "", phone)
         if not phone_digits.isdigit() or len(phone_digits) < 7:
             return {
                 "error": (
                     f"'{phone}' doesn't look like a valid phone number or order ID. "
-                    "Please ask the customer to provide their 10-digit Nepali mobile number "
-                    "or their numeric order ID."
+                    "Please ask the customer to provide their phone number or numeric order ID."
                 )
             }
-
-        # Lookup by phone — normalise the same way CreateOrderTool does
-        phone_digits = re.sub(r"[\s\-]", "", phone)
-        orders = (
-            db.query(Order)
-            .filter(Order.phone == phone_digits)
-            .order_by(Order.created_at.desc())
-            .limit(10)
-            .all()
-        )
+        orders = repo.get_by_phone(phone_digits)
         if not orders:
             return {"error": f"No orders found for phone number {phone}."}
         return {"orders": [_order_to_dict(o) for o in orders]}
 
 
-def _order_to_dict(order: Order) -> dict[str, Any]:
+def _order_to_dict(order) -> dict[str, Any]:
     return {
         "order_id": order.id,
         "grand_total": order.grand_total,
@@ -1029,18 +902,18 @@ class UpdateOrderPaymentTool(Tool):
         }
 
     def run(self, db: Session, order_id: int, payment_method: str) -> dict[str, Any]:
-        order = db.get(Order, order_id)
+        repo = OrderRepository(db)
+        order = repo.get_by_id(order_id)
         if order is None:
             return {"error": f"No order found with id {order_id}."}
 
-        if order.status != OrderStatus.PENDING_PAYMENT:
+        if not repo.is_pending(order):
             return {
                 "error": (
                     f"Order {order_id} cannot be updated — "
                     f"status is '{order.status.value}', not pending_payment."
                 )
             }
-
         normalised = payment_method.strip().lower()
         if normalised not in self._payment_methods:
             return {
@@ -1049,19 +922,14 @@ class UpdateOrderPaymentTool(Tool):
                     f"Supported: {', '.join(sorted(self._payment_methods))}."
                 )
             }
-
-        order.payment_method = payment_method
-        db.add(order)
-        db.commit()
-        db.refresh(order)
-
+        order = repo.update_payment_method(order, payment_method)
         return {
-            "order_id": order.id,
-            "product_name": None,
+            "order_id":       order.id,
+            "product_name":   None,
             "payment_method": order.payment_method,
-            "total_price": order.grand_total,
-            "currency": order.currency,
-            "status": order.status.value,
+            "total_price":    order.grand_total,
+            "currency":       order.currency,
+            "status":         order.status.value,
         }
 
 
@@ -1093,32 +961,16 @@ class GetBestSellersTool(Tool):
         }
 
     def run(self, db: Session, limit: int = 5) -> dict[str, Any]:
-        from sqlalchemy import func
-        # Join OrderItem → Order to filter cancelled orders
-        rows = (
-            db.query(
-                OrderItem.product_name_snapshot,
-                OrderItem.color,
-                func.sum(OrderItem.quantity).label("total_sold"),
-            )
-            .join(Order, OrderItem.order_id == Order.id)
-            .filter(Order.status != OrderStatus.CANCELLED)
-            .group_by(OrderItem.product_name_snapshot, OrderItem.color)
-            .order_by(func.sum(OrderItem.quantity).desc())
-            .limit(limit)
-            .all()
-        )
-
+        rows = OrderRepository(db).get_best_sellers(limit)
         if not rows:
             return {"message": "No sales data available yet.", "best_sellers": []}
-
         return {
             "best_sellers": [
                 {
-                    "rank": i + 1,
+                    "rank":         i + 1,
                     "product_name": row.product_name_snapshot,
-                    "color": row.color,
-                    "total_sold": int(row.total_sold),
+                    "color":        row.color,
+                    "total_sold":   int(row.total_sold),
                 }
                 for i, row in enumerate(rows)
             ]
@@ -1157,7 +1009,7 @@ class GetStoreInfoTool(Tool):
         }
 
     def run(self, db: Session) -> dict[str, Any]:
-        row = db.get(StoreInfo, 1)
+        row = StoreInfoRepository(db).get()
         if row is None:
             return {"error": "Store info not found in database."}
         return {

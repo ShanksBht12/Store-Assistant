@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.prompt import PromptRegistry
 from app.agent.registry import ToolRegistry
-from app.database.models import ConversationState
+from app.database.repositories import ConversationRepository
 from app.providers.llm.base import LLMProvider
 
 if TYPE_CHECKING:
@@ -48,11 +48,9 @@ MAX_HISTORY_MESSAGES = 60  # trim old turns to keep context window manageable
 
 # ── Message history helpers ───────────────────────────────────────────────────
 
-def _load_messages(state: ConversationState, tenant: "TenantContext") -> list[dict[str, Any]]:
+def _load_messages(state, tenant: "TenantContext") -> list[dict[str, Any]]:
     if state.messages:
         msgs = list(state.messages)
-        # Refresh system prompt on every turn so activating a new prompt
-        # version or changing tenant config takes effect without a restart.
         active_prompt = PromptRegistry.get_active_prompt_for_tenant(tenant)
         if msgs and msgs[0].get("role") == "system":
             msgs[0]["content"] = active_prompt
@@ -62,17 +60,11 @@ def _load_messages(state: ConversationState, tenant: "TenantContext") -> list[di
 
 
 def _save_messages(
-    db: Session,
-    state: ConversationState,
+    conv_repo: ConversationRepository,
+    state,
     messages: list[dict[str, Any]],
 ) -> None:
-    system = messages[:1]
-    rest   = messages[1:]
-    if len(rest) > MAX_HISTORY_MESSAGES:
-        rest = rest[-MAX_HISTORY_MESSAGES:]
-    state.messages = system + rest
-    db.add(state)
-    db.commit()
+    conv_repo.save_messages(state, messages)
 
 
 # ── Markdown stripper ─────────────────────────────────────────────────────────
@@ -180,17 +172,14 @@ async def handle_chat_message(
     (reply_text, card_data, payment_method)
     """
     # ── Load or create conversation state ────────────────────────────────────
-    state = db.get(ConversationState, conversation_id)
-    if state is None:
-        state = ConversationState(
-            id=conversation_id,
-            messages=[{
-                "role":    "system",
-                "content": PromptRegistry.get_active_prompt_for_tenant(tenant),
-            }],
-        )
-        db.add(state)
-        db.commit()
+    conv_repo = ConversationRepository(db)
+    state = conv_repo.get_or_create(
+        conversation_id  = conversation_id,
+        initial_messages = [{
+            "role":    "system",
+            "content": PromptRegistry.get_active_prompt_for_tenant(tenant),
+        }],
+    )
 
     last_clean_messages = _load_messages(state, tenant)
     messages = list(last_clean_messages)
@@ -201,7 +190,7 @@ async def handle_chat_message(
 
     # ── Finalise helper (called on every exit path) ───────────────────────────
     def _finalise(content: str, msgs: list) -> tuple[str, dict | None, str | None]:
-        _save_messages(db, state, msgs)
+        _save_messages(conv_repo, state, msgs)
         card_data, payment_method = registry.extract_turn_extras(db, tool_calls_made)
         return content, card_data, payment_method
 
@@ -268,8 +257,7 @@ async def handle_chat_message(
         return _finalise(fallback, messages)
 
     except Exception:
-        # Preserve the last clean state so future requests don't get a 400.
         safe = list(last_clean_messages)
         safe.append({"role": "user", "content": message})
-        _save_messages(db, state, safe)
+        _save_messages(conv_repo, state, safe)
         raise
