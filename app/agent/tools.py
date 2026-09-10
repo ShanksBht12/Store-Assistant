@@ -1062,25 +1062,3 @@ def build_tools(tenant: "TenantContext") -> tuple[dict[str, "Tool"], list[dict[s
     tools = {t.name: t for t in tool_instances}
     specs = [t.spec for t in tool_instances]
     return tools, specs
-
-
-# Backward-compat module-level singletons (default tenant)
-def _default_tools() -> tuple[dict[str, "Tool"], list[dict[str, Any]]]:
-    try:
-        from app.config import get_tenant_context
-        return build_tools(get_tenant_context("default"))
-    except Exception:
-        from app.config import TenantContext
-        fallback = TenantContext(
-            tenant_id="default", display_name="My Store",
-            phone_regex=r"^\+?\d{7,15}$",
-            phone_hint="Please enter a valid phone number.",
-            payment_methods=["card", "cash on delivery"],
-            digital_payments=[],
-            currency="USD", locale="en-US",
-            product_taxonomy="", prompt_template=None,
-        )
-        return build_tools(fallback)
-
-
-TOOLS, TOOL_SPECS = _default_tools()
