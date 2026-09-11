@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from app.api import chat, orders, prompts, store
+from app.api.direct_query import router as direct_query_router
 from app.config import get_settings
 from app.database.database import Base, engine
 
@@ -57,6 +58,7 @@ app.include_router(chat.router)
 app.include_router(orders.router)
 app.include_router(prompts.router)
 app.include_router(store.router)
+app.include_router(direct_query_router)
 
 
 @app.options("/api/chat")
