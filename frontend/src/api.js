@@ -33,3 +33,20 @@ export async function sendMessage(message, conversationId) {
     clearTimeout(timer);
   }
 }
+
+export async function askAnything(question, length, maxWords) {
+  const body = { question, length };
+  if (maxWords) body.max_words = maxWords;
+
+  const response = await fetch(`${API_BASE}/api/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || `Request failed (${response.status})`);
+  }
+  return response.json(); // { answer_markdown, length_used }
+}

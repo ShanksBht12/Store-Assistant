@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { sendMessage } from "./api";
+import ReactMarkdown from "react-markdown";
+import { sendMessage, askAnything } from "./api";
 import esewaQr  from "./assets/esewa-qr.png";
 import khaltiQr from "./assets/khalti-qr.png";
 
@@ -83,6 +84,9 @@ export default function App() {
   const [error,          setError]          = useState(null);
   const [previewProduct, setPreviewProduct] = useState(null);
   const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
+
+  /* ── Tab state ── */
+  const [activeTab, setActiveTab] = useState("chat"); // "chat" | "ask"
 
   const threadRef  = useRef(null);
   const textareaRef = useRef(null);
@@ -219,6 +223,27 @@ export default function App() {
             </div>
           </div>
           <div className="header-actions">
+            {/* Tab switcher */}
+            <div className="tab-switcher" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "chat"}
+                className={`tab-btn ${activeTab === "chat" ? "active" : ""}`}
+                onClick={() => setActiveTab("chat")}
+              >
+                💬 Chat
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "ask"}
+                className={`tab-btn ${activeTab === "ask" ? "active" : ""}`}
+                onClick={() => setActiveTab("ask")}
+              >
+                🔍 Ask Anything
+              </button>
+            </div>
             <button
               type="button"
               className="icon-btn"
@@ -226,7 +251,6 @@ export default function App() {
               title="New conversation"
               aria-label="New conversation"
             >
-              {/* pencil-square icon */}
               <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
                 <path d="M13.586 3.586a2 2 0 112.828 2.828l-9 9A2 2 0 016 16H4a1 1 0 01-1-1v-2a2 2 0 01.586-1.414l9-9z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
@@ -234,6 +258,10 @@ export default function App() {
           </div>
         </div>
 
+        {/* Conditional panel */}
+        {activeTab === "ask" ? (
+          <AskAnythingPanel />
+        ) : (<>
         {/* Thread */}
         <div className="thread" ref={threadRef} role="log" aria-live="polite" aria-label="Conversation">
           <div className="date-divider">Today</div>
@@ -311,7 +339,8 @@ export default function App() {
             )}
           </div>
         </div>
-      </div>
+        </>)}
+      </div>  {/* end chat-panel */}
 
       {/* ── Product preview modal ── */}
       {previewProduct && (
@@ -337,6 +366,115 @@ export default function App() {
     </div>
   );
 }
+
+/* ── AskAnythingPanel ─────────────────────────────────────────────────── */
+
+function AskAnythingPanel() {
+  const [question,  setQuestion]  = useState("");
+  const [length,    setLength]    = useState("medium");
+  const [maxWords,  setMaxWords]  = useState("");
+  const [loading,   setLoading]   = useState(false);
+  const [answer,    setAnswer]    = useState(null);   // { markdown, lengthUsed }
+  const [error,     setError]     = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const q = question.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setError(null);
+    setAnswer(null);
+    try {
+      const mw = maxWords ? parseInt(maxWords, 10) : undefined;
+      const data = await askAnything(q, length, mw);
+      setAnswer({ markdown: data.answer_markdown, lengthUsed: data.length_used });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="ask-panel">
+      <div className="ask-header">
+        <h2 className="ask-title">Ask Anything</h2>
+        <p className="ask-subtitle">
+          Get a direct answer — no store data, no products. Just the LLM.
+        </p>
+      </div>
+
+      <form className="ask-form" onSubmit={handleSubmit}>
+        <textarea
+          className="ask-textarea"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Ask any question…"
+          rows={3}
+          disabled={loading}
+          aria-label="Question"
+        />
+
+        <div className="ask-controls">
+          <div className="ask-length-group">
+            <label className="ask-label" htmlFor="ask-length">Length</label>
+            <select
+              id="ask-length"
+              className="ask-select"
+              value={length}
+              onChange={(e) => setLength(e.target.value)}
+              disabled={loading}
+            >
+              <option value="short">Short (2-3 sentences)</option>
+              <option value="medium">Medium (1-2 paragraphs)</option>
+              <option value="long">Long (detailed with headings)</option>
+            </select>
+          </div>
+
+          <div className="ask-length-group">
+            <label className="ask-label" htmlFor="ask-maxwords">Max words (optional)</label>
+            <input
+              id="ask-maxwords"
+              type="number"
+              className="ask-input-num"
+              value={maxWords}
+              onChange={(e) => setMaxWords(e.target.value)}
+              placeholder="e.g. 50"
+              min={10}
+              max={2000}
+              disabled={loading}
+              aria-label="Maximum word count"
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="ask-submit-btn"
+            disabled={loading || !question.trim()}
+          >
+            {loading ? "Thinking…" : "Ask"}
+          </button>
+        </div>
+      </form>
+
+      {error && (
+        <div className="ask-error" role="alert">⚠ {error}</div>
+      )}
+
+      {answer && (
+        <div className="ask-result">
+          <div className="ask-result-meta">
+            Length: <strong>{answer.lengthUsed}</strong>
+          </div>
+          <div className="ask-markdown-body">
+            <ReactMarkdown>{answer.markdown}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 /* ── MessageGroup ─────────────────────────────────────────────────────── */
 
