@@ -1286,6 +1286,10 @@ body {
   transition: border-color 0.15s;
 }
 .ask-select:focus, .ask-input-num:focus { border-color: rgba(255,255,255,0.25); }
+.ask-select option {
+  background: #1e1e22;
+  color: #e5e7eb;
+}
 .ask-input-num { width: 90px; }
 .ask-submit-btn {
   background: #3b82f6;
