@@ -38,15 +38,28 @@ export async function askAnything(question, length, maxWords) {
   const body = { question, length };
   if (maxWords) body.max_words = maxWords;
 
-  const response = await fetch(`${API_BASE}/api/ask`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.detail || `Request failed (${response.status})`);
+  try {
+    const response = await fetch(`${API_BASE}/api/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Request failed (${response.status})`);
+    }
+    return response.json(); // { answer_markdown, length_used }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("The request took too long. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return response.json(); // { answer_markdown, length_used }
 }
