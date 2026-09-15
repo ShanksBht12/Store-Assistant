@@ -65,6 +65,7 @@ async def ask(
             question  = payload.question,
             length    = payload.length,
             max_words = payload.max_words,
+            tenant    = tenant,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

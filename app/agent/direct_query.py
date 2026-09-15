@@ -18,7 +18,12 @@ ENTRY POINT
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.providers.llm import get_llm_provider_for_tenant
+
+if TYPE_CHECKING:
+    from app.config import TenantContext
 
 # ── Length → instruction map ──────────────────────────────────────────────────
 
@@ -51,6 +56,7 @@ async def generate_direct_answer(
     question: str,
     length: str = "medium",
     max_words: int | None = None,
+    tenant: "TenantContext | None" = None,
 ) -> tuple[str, str]:
     """
     Generate a length-controlled Markdown answer for the given question.
@@ -59,11 +65,12 @@ async def generate_direct_answer(
         question:  The user's free-text question.
         length:    One of 'short', 'medium', 'long'.
         max_words: Optional hard word-count cap — overrides the length preset.
+        tenant:    TenantContext resolved at the API boundary. When provided,
+                   the tenant's configured LLM provider/model/credentials are
+                   used. Falls back to the default tenant if not supplied.
 
     Returns:
         (answer_markdown, length_used)
-        answer_markdown — the LLM's response as a Markdown string.
-        length_used     — the effective length instruction that was applied.
     """
     if max_words is not None:
         length_instruction = f"Keep the answer under {max_words} words."
@@ -74,10 +81,12 @@ async def generate_direct_answer(
 
     user_message = _build_user_message(question, length_instruction)
 
-    # Use the default tenant's LLM provider — same provider abstraction as the
-    # chat endpoint, zero duplication, works with openai/groq/generic/mock.
-    from app.config import get_tenant_context
-    tenant = get_tenant_context("default")
+    # Use the caller-supplied tenant so the correct LLM key/model is used.
+    # Only fall back to "default" if no tenant was passed (e.g. internal calls).
+    if tenant is None:
+        from app.config import get_tenant_context
+        tenant = get_tenant_context("default")
+
     llm = get_llm_provider_for_tenant(tenant)
 
     answer = await llm.generate(
